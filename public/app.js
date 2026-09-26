@@ -187,7 +187,7 @@
   }
   function addScriptNode(file, lang, x, y) { return addNode('code', x, y, { lang, file, inputs: '', values: {} }, base(file)); }
   function addNode(kind, x, y, data, title) {
-    const k = KIND[kind], n = { id: uid(), kind, x: Math.round(x), y: Math.round(y), w: k.w, title: title || k.label.toLowerCase(), data: data || {} };
+    const k = KIND[kind], n = { id: uid(), kind, x: gsnap(x), y: gsnap(y), w: k.w, title: title || k.label.toLowerCase(), data: data || {} };
     if (k.h) n.h = k.h;
     if (kind === 'code' && !n.data.code && !n.data.file) { const L = LANGS[n.data.lang || 'python']; Object.assign(n.data, { code: L.tpl, inputs: n.data.inputs != null ? n.data.inputs : (L.tier === 'vars' ? 'x' : ''), values: n.data.values || {} }); }
     if (kind === 'code' && n.data.file && n.data.inputs == null) Object.assign(n.data, { inputs: '', values: {} });
@@ -201,12 +201,13 @@
 
   /* ───────── Canvas view ───────── */
   const stage = $('#stage'), world = $('#world');
+  const GRID = 20, gsnap = (v, free) => free ? Math.round(v) : Math.round(v / GRID) * GRID;
   // the stage must never scroll natively (focusing an off-screen input would shift everything)
   stage.addEventListener('scroll', () => { if (stage.scrollLeft || stage.scrollTop) { stage.scrollLeft = 0; stage.scrollTop = 0; } });
   function applyView() {
     const v = S.view;
     world.style.transform = `translate(${v.x}px,${v.y}px) scale(${v.k})`;
-    stage.style.backgroundPosition = `${v.x}px ${v.y}px`; stage.style.backgroundSize = `${22 * v.k}px ${22 * v.k}px`;
+    stage.style.backgroundPosition = `${v.x}px ${v.y}px`; stage.style.backgroundSize = `${GRID * v.k}px ${GRID * v.k}px`;
     $('#zoom-val').textContent = Math.round(v.k * 100) + '%';
     drawMinimap(); save();
   }
@@ -317,7 +318,7 @@
       if (r.status) meta.push(r.status === 'running' ? '<b>running…</b>' : r.status === 'cached' ? 'cached' : r.status === 'skipped' ? 'skipped (an input failed)' : r.status === 'error' ? '<b style="color:var(--red)">error</b>' : '<b>✓</b>');
       if (r.ms != null && r.status !== 'running') meta.push(r.ms + ' ms');
       if (p.type) meta.push(esc(p.type) + (p.shape ? ' ' + esc(JSON.stringify(p.shape)) : '') + (p.dtype ? ' ' + esc(p.dtype) : ''));
-      h += `<div class="n-meta">${meta.join(' · ')}</div>`;
+      h += `<div class="n-meta"><span>${meta.join(' · ')}</span>${r.status === 'ok' || r.status === 'cached' || r.error ? `<button class="n-expand" data-act="expand" title="Open the output in a large window">${ICON('expand')}</button>` : ''}</div>`;
       if (r.error) h += `<div class="n-err">${esc(r.error)}</div>`;
       if (p.images) h += p.images.map(src => `<img class="n-img" src="${src.startsWith('data:') ? src : 'data:image/png;base64,' + src}" alt="plot">`).join('');
       if (p.html) h += `<div class="n-tbl">${p.html}</div>`;
@@ -419,11 +420,11 @@
     if (drag.t === 'pan') { const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0; if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true; S.view.x = drag.vx + dx; S.view.y = drag.vy + dy; applyView(); }
     else if (drag.t === 'move') {
       const dx = (e.clientX - drag.x0) / k, dy = (e.clientY - drag.y0) / k; if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
-      drag.orig.forEach(o => { o.m.x = Math.round(o.x + dx); o.m.y = Math.round(o.y + dy); const el = nodeEl(o.m.id); el.style.left = o.m.x + 'px'; el.style.top = o.m.y + 'px'; });
+      drag.orig.forEach(o => { o.m.x = gsnap(o.x + dx, e.altKey); o.m.y = gsnap(o.y + dy, e.altKey); const el = nodeEl(o.m.id); el.style.left = o.m.x + 'px'; el.style.top = o.m.y + 'px'; });
       scheduleEdges();
     } else if (drag.t === 'resize') {
       const n = node(drag.id), el = nodeEl(drag.id);
-      n.w = Math.max(200, Math.round(drag.w + (e.clientX - drag.x0) / k)); n.h = Math.max(90, Math.round(drag.h + (e.clientY - drag.y0) / k));
+      n.w = Math.max(200, gsnap(drag.w + (e.clientX - drag.x0) / k, e.altKey)); n.h = Math.max(80, gsnap(drag.h + (e.clientY - drag.y0) / k, e.altKey));
       el.style.width = n.w + 'px'; el.style.height = n.h + 'px'; scheduleEdges();
     } else if (drag.t === 'wire') updateTempWire(e);
     else if (drag.t === 'box') {
@@ -498,6 +499,7 @@
     if (act === 'src') showSource(n.data.file, n.data.line);
     if (act === 'termhere') addNode('terminal', n.x + n.w + 40, n.y, { cwd: dir(n.data.file) }, 'terminal');
     if (act === 'restart') startTerm(n, true);
+    if (act === 'expand') showOutput(n);
     if (act === 'inline') { const r = await req('read', { path: n.data.file }); if (!r.ok) return toast(r.error); n.data.code = r.text; delete n.data.file; renderNode(n); commit(); toast('Copied into the node · the original file is unchanged'); }
   });
   nodesHost.addEventListener('dblclick', e => {
@@ -686,6 +688,51 @@
     } catch (err) { toast('Could not open: ' + err.message); }
   };
 
+
+  /* ───────── Tidy: arrange the workflow left → right in data-flow order ───────── */
+  function tidy() {
+    if (!S.nodes.length) return;
+    const flow = S.nodes.filter(n => S.edges.some(e => e.from === n.id || e.to === n.id));
+    const loose = S.nodes.filter(n => !flow.includes(n));
+    const level = {}, parents = id => S.edges.filter(e => e.to === id).map(e => e.from);
+    const lv = (id, seen = new Set()) => { if (level[id] != null) return level[id]; if (seen.has(id)) return 0; seen.add(id); const ps = parents(id); return (level[id] = ps.length ? 1 + Math.max(...ps.map(p => lv(p, seen))) : 0); };
+    flow.forEach(n => lv(n.id));
+    const cols = [];
+    flow.forEach(n => { (cols[level[n.id]] = cols[level[n.id]] || []).push(n); });
+    const h = n => { const el = nodeEl(n.id); return el ? el.offsetHeight : 160; };
+    const b = bounds(), x0 = gsnap(Math.min(b.x1, 40)), y0 = gsnap(Math.min(b.y1, 40));
+    let x = x0;
+    cols.forEach((col, ci) => {
+      if (!col) return;
+      if (ci) col.sort((a, c) => avgY(a) - avgY(c));
+      let y = y0;
+      col.forEach(n => { n.x = x; n.y = y; y = gsnap(y + h(n) + 40); });
+      x = gsnap(x + Math.max(...col.map(n => n.w)) + 100);
+    });
+    function avgY(n) { const ps = parents(n.id).map(node).filter(Boolean); return ps.length ? ps.reduce((s, p) => s + p.y, 0) / ps.length : 0; }
+    let yLoose = gsnap(Math.max(y0, ...flow.map(n => n.y + h(n))) + 80), xl = x0;
+    loose.forEach(n => { n.x = xl; n.y = yLoose; xl = gsnap(xl + n.w + 40); });
+    S.nodes.forEach(n => { const el = nodeEl(n.id); if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; } });
+    renderEdges(); commit(); fit(); toast('Arranged left → right · Ctrl+Z to undo');
+  }
+  $('#tidy').onclick = tidy;
+
+  /* ───────── Large output viewer ───────── */
+  function showOutput(n) {
+    const r = R[n.id] || {}, p = r.preview || {};
+    let h = '';
+    if (r.error) h += `<div class="n-err big">${esc(r.error)}</div>`;
+    if (p.images) h += p.images.map(src => `<img class="out-img" src="${src.startsWith('data:') ? src : 'data:image/png;base64,' + src}" alt="output">`).join('');
+    if (p.html) h += `<div class="n-tbl big">${p.html}</div>`;
+    if (p.plot && !p.images) h += '<canvas class="n-plot big"></canvas>';
+    if (p.text != null) h += `<pre class="out-text">${esc(p.text)}</pre>`;
+    if (r.logs) h += `<h3 class="out-h">OUTPUT LOG</h3><pre class="out-text log">${esc(r.logs)}</pre>`;
+    $('#out-title').textContent = n.title + (p.type ? '  ·  ' + p.type + (p.shape ? ' ' + JSON.stringify(p.shape) : '') : '');
+    $('#out-body').innerHTML = h || '<p class="fine">No output yet. Run the node first.</p>';
+    $('#out-modal').hidden = false;
+    const cv = $('#out-body .n-plot'); if (cv) requestAnimationFrame(() => drawPlot(cv, p.plot));
+  }
+
   /* ───────── Export as a Python script ───────── */
   function exportPy() {
     const run = S.nodes.filter(n => ['func', 'code', 'value', 'viewer'].includes(n.kind));
@@ -757,6 +804,8 @@
     else if (k === 'enter' && mod) { e.preventDefault(); run(null); }
     else if (k === 'enter' && e.shiftKey) { e.preventDefault(); $('#run-sel').click(); }
     else if (k === 'f') fit();
+    else if (k === 't' && !mod) tidy();
+    else if (e.key === '?') $('#help-modal').hidden = false;
     else if (k === 'escape') { sel.clear(); selEdge = null; markSel(); renderEdges(); closePalette(); $$('.modal').forEach(m => { m.hidden = true; }); }
   });
   document.addEventListener('keyup', e => { if (e.key === ' ') spaceDown = false; });

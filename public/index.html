@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
-<link rel="stylesheet" href="style.css?v=5" />
+<link rel="stylesheet" href="style.css?v=6" />
 </head>
 <body>
 <header class="bar">
@@ -32,6 +32,7 @@
     <button class="pill icon" id="redo" data-icon="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"></button>
     <button class="pill" id="open-flow" data-icon="folder-open" title="Open a saved .flow.json">OPEN</button>
     <button class="pill" id="save-flow" data-icon="save" title="Download this workflow (Ctrl+S)">SAVE</button>
+    <button class="pill" id="tidy" data-icon="layout" title="Arrange the workflow neatly (T)">TIDY</button>
     <button class="pill" id="export-py" data-icon="file-code" title="Export the workflow as a normal Python script you can run anywhere">EXPORT .PY</button>
     <button class="pill icon" id="theme-btn" data-icon="theme" title="Light / dark" aria-label="Toggle light / dark"></button>
   </div>
@@ -54,7 +55,7 @@
   <div class="selbox" id="selbox"></div>
   <div class="zoom mono"><button id="zoom-out" data-icon="minus" title="Zoom out" aria-label="Zoom out"></button><span id="zoom-val">100%</span><button id="zoom-in" data-icon="plus" title="Zoom in" aria-label="Zoom in"></button><button id="zoom-fit" data-icon="fit" title="Fit everything (F)" aria-label="Fit everything"></button></div>
   <canvas class="minimap" id="minimap" width="200" height="130"></canvas>
-  <div class="hint mono" id="hint">Drag background to pan · Ctrl+scroll to zoom · drag from ● to ● to connect · double-click to add</div>
+  <div class="hint mono" id="hint">Drag background to pan · Ctrl+scroll to zoom · drag between dots to connect · double-click to add · press ? for shortcuts</div>
 </main>
 
 <div class="palette" id="palette" hidden>
@@ -87,6 +88,28 @@ flowbench stop · status · update · help</pre></li>
   </div>
 </div>
 
+<div class="modal" id="out-modal" hidden>
+  <div class="dialog wide"><button class="x" data-close data-icon="close" aria-label="Close"></button><h2 class="mono" id="out-title"></h2><div class="out-body" id="out-body"></div></div>
+</div>
+<div class="modal" id="help-modal" hidden>
+  <div class="dialog"><button class="x" data-close data-icon="close" aria-label="Close"></button><h2 class="dotfont">SHORTCUTS</h2>
+    <table class="keys">
+      <tr><td><kbd>Ctrl</kbd> <kbd>Enter</kbd></td><td>Run the whole workflow</td></tr>
+      <tr><td><kbd>Shift</kbd> <kbd>Enter</kbd></td><td>Run the selected nodes</td></tr>
+      <tr><td>double-click canvas</td><td>Add a node (search functions and languages)</td></tr>
+      <tr><td>drag between dots</td><td>Connect an output to an input · drag an input away to disconnect</td></tr>
+      <tr><td><kbd>T</kbd></td><td>Tidy: arrange left → right</td></tr>
+      <tr><td><kbd>F</kbd></td><td>Fit everything on screen</td></tr>
+      <tr><td><kbd>Shift</kbd> + drag</td><td>Select several nodes</td></tr>
+      <tr><td><kbd>Alt</kbd> + drag</td><td>Move without snapping to the grid</td></tr>
+      <tr><td><kbd>Ctrl</kbd> <kbd>D</kbd> · <kbd>Ctrl</kbd> <kbd>C</kbd> / <kbd>V</kbd></td><td>Duplicate · copy / paste</td></tr>
+      <tr><td><kbd>Del</kbd></td><td>Delete the selected nodes or wire</td></tr>
+      <tr><td><kbd>Ctrl</kbd> <kbd>Z</kbd> · <kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>Z</kbd></td><td>Undo · redo</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + scroll · drag background</td><td>Zoom · pan</td></tr>
+      <tr><td><kbd>Ctrl</kbd> <kbd>S</kbd></td><td>Save the workflow file</td></tr>
+    </table>
+  </div>
+</div>
 <div class="modal" id="src-modal" hidden>
   <div class="dialog wide"><button class="x" data-close data-icon="close" aria-label="Close"></button><h2 class="mono" id="src-title"></h2><pre class="src" id="src-body"></pre></div>
 </div>
@@ -94,7 +117,7 @@ flowbench stop · status · update · help</pre></li>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-<script src="icons.js?v=1"></script>
-<script src="app.js?v=7"></script>
+<script src="icons.js?v=2"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

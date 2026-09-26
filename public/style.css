@@ -61,7 +61,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .lib-open { position: fixed; left: 8px; top: 64px; z-index: 19; width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); }
 
 /* stage */
-.stage { position: fixed; top: 52px; left: 280px; right: 0; bottom: 0; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--dot) 1.1px, transparent 1.4px); cursor: default; touch-action: none; transition: left .25s; }
+.stage { position: fixed; top: 52px; left: 280px; right: 0; bottom: 0; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--dot) 1.1px, transparent 1.4px); background-size: 20px 20px; cursor: default; touch-action: none; transition: left .25s; }
 body.lib-hidden .stage { left: 0; }
 .stage.panning { cursor: grabbing; }
 .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
@@ -224,3 +224,22 @@ details.n-fold summary::before { content: "▸ "; } details.n-fold[open] summary
 .ti.script .ic { color: var(--k-code); }
 .ti small.tag { margin-left: auto; font: 700 8.5px var(--mono); letter-spacing: .08em; color: var(--mute); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 .n-field select { max-width: 150px; }
+
+/* ───── neat: result expand, output window, shortcuts ───── */
+.n-meta { align-items: center; }
+.n-meta span { flex: 1; min-width: 0; }
+.n-expand { border: 0; background: none; color: var(--mute); width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; padding: 0; margin: -3px -3px -3px 0; }
+.n-expand:hover { color: var(--ink); background: var(--panel2); }
+.n-expand .ico { width: 13px; height: 13px; }
+.out-body { display: grid; gap: 12px; margin-top: 10px; }
+.out-img { width: 100%; border-radius: 10px; background: #fff; }
+.out-text { margin: 0; padding: 12px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); font: 12px/1.55 var(--code); white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
+.out-text.log { color: var(--ink2); }
+.out-h { font: 700 10px var(--mono); letter-spacing: .14em; color: var(--mute); margin: 4px 0 -4px; }
+.n-tbl.big { max-height: 60vh; }
+.n-plot.big { height: 320px; }
+.n-err.big { max-height: 50vh; }
+table.keys { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+table.keys td { padding: 7px 4px; border-bottom: 1px solid var(--line2); vertical-align: middle; }
+table.keys td:first-child { white-space: nowrap; color: var(--ink2); width: 44%; font-size: 12px; }
+kbd { font: 700 10.5px var(--mono); padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--panel2); color: var(--ink); }
