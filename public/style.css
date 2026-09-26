@@ -83,7 +83,7 @@ body.lib-hidden .stage { left: 0; }
 @media (max-width: 900px) { .hint { display: none; } }
 
 /* nodes */
-.node { position: absolute; min-width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; --kc: var(--k-func); }
+.node { isolation: isolate; position: absolute; min-width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); display: flex; flex-direction: column; --kc: var(--k-func); }
 .node::before { content: ""; position: absolute; left: -1px; right: -1px; top: -1px; height: 3px; border-radius: 14px 14px 0 0; background: var(--kc); opacity: .9; }
 .node.sel { border-color: var(--ink2); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ink) 55%, transparent), var(--shadow); }
 .node.k-value { --kc: var(--k-value); } .node.k-code { --kc: var(--k-code); } .node.k-viewer { --kc: var(--k-viewer); } .node.k-terminal { --kc: var(--k-terminal); } .node.k-note { --kc: var(--k-note); }

@@ -423,7 +423,7 @@ class Session:
         if not self.authed:
             if t == "hello" and secrets.compare_digest(str(msg.get("token", "")), self.cfg.token):
                 self.authed = True
-                reply(ok=True, version=VERSION, python=self.python, pyversion=sys.version.split()[0], platform=sys.platform,
+                reply(ok=True, version=VERSION, python=self.python, pyversion=self.cfg.pyversion, platform=sys.platform,
                       roots=[str(r) for r in self.cfg.roots], fullterm=bool(PtyProcess) or not IS_WIN)
             else:
                 await self._send({"re": rid, "ok": False, "error": "Wrong token"})
@@ -707,17 +707,53 @@ def to_table(x, name: str = "value"):
 async def main():
     ap = argparse.ArgumentParser(description="Flowbench local runner")
     ap.add_argument("--root", action="append", help="Folder(s) Flowbench may read. Default: current folder")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--python", default=sys.executable, help="Python interpreter used to run your code")
+    ap.add_argument("--config", help="JSON file with roots / python / port (written by the installer)")
+    ap.add_argument("--port", type=int, default=None, help="Default 8765")
+    ap.add_argument("--python", default=None, help="Python interpreter used to run your code (default: this one)")
     ap.add_argument("--allow-origin", action="append", default=[], help="Extra allowed web origin")
     ap.add_argument("--new-token", action="store_true", help="Generate a new secret token")
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("--examples", action="store_true", help="Write example modules into the first root")
     cfg = ap.parse_args()
-    cfg.roots = [Path(r).expanduser().resolve() for r in (cfg.root or [os.getcwd()])]
-    for r in cfg.roots:
+    conf = {}
+    if cfg.config and Path(cfg.config).exists():
+        conf = json.loads(Path(cfg.config).read_text(encoding="utf-8-sig"))
+    cfg.port = cfg.port or int(conf.get("port") or 8765)
+    cfg.python = cfg.python or conf.get("python") or sys.executable
+    cfg.allow_origin += conf.get("allow_origin", [])
+    roots = [Path(r).expanduser().resolve() for r in (cfg.root or conf.get("roots") or [os.getcwd()])]
+    cfg.roots = [r for r in roots if r.is_dir()]
+    for r in roots:
         if not r.is_dir():
-            print("Not a folder:", r); sys.exit(1)
+            print("  Skipping missing folder:", r)
+    if not cfg.roots:
+        print("No valid folders. Pass --root or run:  flowbench add <folder>"); sys.exit(1)
+    cfg.token = load_token(cfg.new_token)
+    link = "http://127.0.0.1:%d/#token=%s" % (cfg.port, cfg.token)
+
+    # single instance: if a runner already listens on this port, just open the page
+    import socket
+    try:
+        socket.create_connection(("127.0.0.1", cfg.port), timeout=0.5).close()
+        print("Flowbench is already running on port %d. Opening it." % cfg.port)
+        if not cfg.no_browser:
+            webbrowser.open(link)
+        return
+    except OSError:
+        pass
+
+    import subprocess
+    try:
+        cfg.pyversion = subprocess.run([cfg.python, "-c", "import sys; print(sys.version.split()[0])"], capture_output=True, text=True, timeout=20).stdout.strip()
+    except Exception:
+        cfg.pyversion = ""
+    if not cfg.pyversion:
+        print("Can't start the Python interpreter:", cfg.python); sys.exit(1)
+
+    pid_file = Path.home() / ".flowbench" / "runner.pid"
+    pid_file.write_text(json.dumps({"pid": os.getpid(), "port": cfg.port}), encoding="utf-8")
+    import atexit
+    atexit.register(lambda: pid_file.unlink(missing_ok=True))
     if cfg.examples:
         ex = cfg.roots[0] / "flowbench_examples"
         ex.mkdir(exist_ok=True)
@@ -726,7 +762,6 @@ async def main():
                 (ex / name).write_text(src, encoding="utf-8")
         print("Example modules written to", ex)
     cfg.origins = {APP_URL.rstrip("/")} | {o.rstrip("/") for o in cfg.allow_origin}
-    cfg.token = load_token(cfg.new_token)
 
     async def handler(ws, *_):
         headers = ws.request.headers if NEW_API else ws.request_headers
@@ -766,10 +801,12 @@ async def main():
             return status, [("Content-Type", ctype), ("Content-Length", str(len(body)))], body
 
     async with ws_serve(handler, "127.0.0.1", cfg.port, max_size=64 * 1024 * 1024, ping_interval=20, process_request=process_request):
-        link = "http://127.0.0.1:%d/#token=%s" % (cfg.port, cfg.token)
-        sys.stdout.reconfigure(line_buffering=True)
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except Exception:
+            pass
         print("\n  FLOWBENCH runner v%s" % VERSION)
-        print("  Python   : %s (%s)" % (cfg.python, sys.version.split()[0]))
+        print("  Python   : %s (%s)" % (cfg.python, cfg.pyversion))
         print("  Folders  : %s" % "\n             ".join(str(r) for r in cfg.roots))
         print("  Listening: %s  (this computer only)" % url)
         print("  Terminal : %s" % ("full" if (PtyProcess or not IS_WIN) else "basic  (pip install pywinpty for a full terminal)"))

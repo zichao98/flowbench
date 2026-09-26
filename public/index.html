@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
-<link rel="stylesheet" href="style.css?v=2" />
+<link rel="stylesheet" href="style.css?v=3" />
 </head>
 <body>
 <header class="bar">
@@ -32,6 +32,7 @@
     <button class="pill icon" id="redo" title="Redo (Ctrl+Shift+Z)">↷</button>
     <button class="pill" id="open-flow" title="Open a saved .flow.json">OPEN</button>
     <button class="pill" id="save-flow" title="Download this workflow (Ctrl+S)">SAVE</button>
+    <button class="pill" id="export-py" title="Export the workflow as a normal Python script you can run anywhere">EXPORT .PY</button>
     <button class="pill icon" id="theme-btn" aria-label="Toggle light / dark"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/></svg></button>
   </div>
   <input type="file" id="file-in" accept=".json,application/json" hidden />
@@ -65,16 +66,24 @@
   <div class="dialog">
     <button class="x" data-close>×</button>
     <h2 class="dotfont">CONNECT THE RUNNER</h2>
-    <p>Flowbench runs your Python on <b>your own computer</b> through a small local program. Do this once:</p>
+    <p>Flowbench runs your Python on <b>your own computer</b> through a small local program. Install it once, with one line:</p>
     <ol class="steps">
-      <li>Download <a href="runner.py" download>runner.py</a> and put it anywhere (for example your Desktop).</li>
-      <li>Install its two helpers (once):<pre class="cmd">pip install websockets pywinpty</pre><small>pywinpty gives full terminals on Windows. On macOS / Linux just <code>pip install websockets</code>.</small></li>
-      <li>Start it, pointing at the folder with your code:<pre class="cmd">python runner.py --root "C:\Users\zicha\OneDrive\Desktop" --examples</pre><small><code>--examples</code> adds a small demo folder. Your browser opens Flowbench at <b>http://127.0.0.1:8765</b>, already connected. Use that address from then on.</small></li>
+      <li><b>Windows</b>: open PowerShell and paste<pre class="cmd">irm https://flowbench.zichaoleng55.workers.dev/install.ps1 | iex</pre>
+        <b>macOS / Linux</b>: open Terminal and paste<pre class="cmd">curl -fsSL https://flowbench.zichaoleng55.workers.dev/install.sh | bash</pre>
+        <small>Needs Python 3.9+. Nothing is installed into your own Python; the runner gets a private environment.</small></li>
+      <li>From then on just double-click <b>Flowbench</b> on your Desktop (or type <code>flowbench</code> in any terminal). It opens at <b>http://127.0.0.1:8765</b>, already connected.</li>
+      <li>Handy commands:<pre class="cmd">flowbench add .          # show the current folder's code in the library
+flowbench python C:\path\to\env\python.exe   # run your code with a specific env
+flowbench examples       # add a small demo folder
+flowbench stop · status · update · help</pre></li>
     </ol>
+    <details><summary>Manual setup (without the installer)</summary>
+      <p>Download <a href="runner.py" download>runner.py</a>, run <code>pip install websockets pywinpty</code>, then <code>python runner.py --root "C:\path\to\code"</code>.</p>
+    </details>
     <details><summary>Connect manually</summary>
       <div class="row"><label>Runner address <input id="rc-url" value="ws://127.0.0.1:8765" /></label><label>Token <input id="rc-token" placeholder="printed by runner.py" /></label><button class="pill primary" id="rc-connect">CONNECT</button></div>
     </details>
-    <p class="fine"><b>Why a local address?</b> Browsers increasingly block public websites from talking to programs on your computer, so the runner serves this same app locally. The runner only listens on this computer (127.0.0.1), needs the secret token, and only reads the folders you pass with <code>--root</code>. If Chrome asks to allow access to devices on your local network, allow it.</p>
+    <p class="fine"><b>Why a local address?</b> Browsers increasingly block public websites from talking to programs on your computer, so the runner serves this same app locally. The runner only listens on this computer (127.0.0.1), needs the secret token, and only reads the folders you added. If Chrome asks to allow access to devices on your local network, allow it.</p>
   </div>
 </div>
 
@@ -85,6 +94,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>
