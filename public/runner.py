@@ -606,7 +606,8 @@ def get_asset(path):
     import urllib.request
     cache_file = Path.home() / ".flowbench" / "app" / path.lstrip("/")
     try:
-        with urllib.request.urlopen(APP_URL.rstrip("/") + path, timeout=8) as r:
+        req = urllib.request.Request(APP_URL.rstrip("/") + path, headers={"User-Agent": "flowbench-runner/" + VERSION})
+        with urllib.request.urlopen(req, timeout=8) as r:
             body = r.read()
         cache_file.parent.mkdir(parents=True, exist_ok=True)
         cache_file.write_bytes(body)

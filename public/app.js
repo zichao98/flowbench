@@ -670,7 +670,8 @@
   };
 
   /* ───────── Boot ───────── */
-  if (!S.nodes.length) {
+  const firstRun = !S.nodes.length;
+  if (firstRun) {
     const note = { id: uid(), kind: 'note', x: 40, y: 30, w: 330, h: 230, title: 'start here', data: { text: 'Welcome to Flowbench.\n\n1. Connect the runner (top left) so the library shows your Python files.\n2. Drag a function from the library onto the canvas.\n3. Drag from a ● output to a ● input to wire nodes together.\n4. Press ▶ RUN. Results, tables and plots appear inside the nodes.\n5. Open terminals (>_ TERMINAL) to check results in parallel.\n\nThe small workflow on the right is a demo: run it!' } };
     const v = { id: uid(), kind: 'value', x: 420, y: 40, w: 280, title: 'x axis', data: { expr: 'np.linspace(0, 12, 400)' } };
     const c = { id: uid(), kind: 'code', x: 760, y: 30, w: 360, h: 300, title: 'damped sine', data: { inputs: 'x', values: {}, code: '# inputs become variables; assign your output to `result`\nimport matplotlib.pyplot as plt\ny = np.sin(x) * np.exp(-x / 5)\nplt.figure(figsize=(5, 2.6))\nplt.plot(x, y)\nplt.title("damped sine")\nresult = y' } };
@@ -679,7 +680,7 @@
     lastSnap = snap(); save();
   }
   renderAll(); renderLib(); setStatus('off');
-  requestAnimationFrame(() => { renderEdges(); drawMinimap(); });
+  requestAnimationFrame(() => { if (firstRun) fit(); renderEdges(); drawMinimap(); });
   window.addEventListener('resize', () => { applyView(); });
   connect();
   if (!RC.token) setTimeout(() => { if (!RC.ok) openConnect(); }, 600);
