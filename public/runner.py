@@ -712,6 +712,10 @@ class Session:
                 if len(Path(dirpath).relative_to(root).parts) > 6:
                     dirnames[:] = []
                 for fn in filenames:
+                    lang = EXT_LANG.get(os.path.splitext(fn)[1].lower())
+                    if lang:
+                        files.append({"path": os.path.join(dirpath, fn), "funcs": [], "lang": lang})
+                        continue
                     if not fn.endswith(".py"):
                         continue
                     p = os.path.join(dirpath, fn)

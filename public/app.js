@@ -163,8 +163,8 @@
   async function renderSearch(q) {
     const tree = $('#lib-tree'); tree.innerHTML = '<div class="lib-empty">Searching…</div>';
     const idx = await ensureIndex(), rows = [];
-    idx.forEach(f => f.funcs.forEach(fn => { if (fn.toLowerCase().includes(q) || base(f.path).toLowerCase().includes(q)) rows.push({ file: f.path, fn }); }));
-    tree.innerHTML = rows.length ? rows.slice(0, 300).map(r => `<div class="ti fn" draggable="true" data-fn="${esc(r.fn)}" data-fnfile="${esc(r.file)}" title="${esc(r.file)}"><span class="tw"></span><span class="ic">${ICON('func')}</span>${esc(r.fn)}<small>${esc(base(r.file))}</small></div>`).join('') : '<div class="lib-empty">No functions match.</div>';
+    idx.forEach(f => { if (f.lang) { if (base(f.path).toLowerCase().includes(q)) rows.push({ file: f.path, lang: f.lang }); return; } f.funcs.forEach(fn => { if (fn.toLowerCase().includes(q) || base(f.path).toLowerCase().includes(q)) rows.push({ file: f.path, fn }); }); });
+    tree.innerHTML = rows.length ? rows.slice(0, 300).map(r => r.lang ? scriptItem({ path: r.file, name: base(r.file), lang: r.lang }) : `<div class="ti fn" draggable="true" data-fn="${esc(r.fn)}" data-fnfile="${esc(r.file)}" title="${esc(r.file)}"><span class="tw"></span><span class="ic">${ICON('func')}</span>${esc(r.fn)}<small>${esc(base(r.file))}</small></div>`).join('') : '<div class="lib-empty">No functions or scripts match.</div>';
   }
   $('#lib-tree').addEventListener('click', async e => {
     const d = e.target.closest('[data-dir]'), f = e.target.closest('[data-file]'), fn = e.target.closest('[data-fn]'), sc = e.target.closest('[data-script]');
@@ -621,7 +621,7 @@
     if (!PAL) return;
     const q = $('#pal-q').value.trim().toLowerCase(), items = [];
     BUILTINS.forEach(([k, name, desc]) => { if (!q || name.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) { const [kind, lang] = k.split(':'); items.push({ kind, lang, name, desc }); } });
-    if (RC.ok) { const idx = await ensureIndex(); idx.forEach(f => f.funcs.forEach(fn => { if (!q || fn.toLowerCase().includes(q)) items.push({ kind: 'func', name: fn, file: f.path, desc: base(f.path) }); })); }
+    if (RC.ok) { const idx = await ensureIndex(); idx.forEach(f => { if (f.lang) { if (q && base(f.path).toLowerCase().includes(q)) items.push({ kind: 'code', script: f.path, lang: f.lang, name: base(f.path), desc: 'script · ' + ((LANGS[f.lang] || {}).label || f.lang) }); return; } f.funcs.forEach(fn => { if (!q || fn.toLowerCase().includes(q)) items.push({ kind: 'func', name: fn, file: f.path, desc: base(f.path) }); }); }); }
     PAL.items = items.slice(0, 60); PAL.idx = 0; palRender();
   }
   function palRender() {
@@ -629,7 +629,7 @@
   }
   async function palPick(i) {
     const it = PAL && PAL.items[i]; if (!it) return; const { x, y, wire } = PAL; closePalette();
-    const n = it.kind === 'func' ? await addFuncNode(it.file, it.name, x, y - 20) : addNode(it.kind, x, y - 20, it.lang ? { lang: it.lang } : {}, it.lang ? LANGS[it.lang].label.replace(' (container)', '').toLowerCase() : it.kind === 'terminal' ? 'terminal' : null);
+    const n = it.script ? addScriptNode(it.script, it.lang, x, y - 20) : it.kind === 'func' ? await addFuncNode(it.file, it.name, x, y - 20) : addNode(it.kind, x, y - 20, it.lang ? { lang: it.lang } : {}, it.lang ? LANGS[it.lang].label.replace(' (container)', '').toLowerCase() : it.kind === 'terminal' ? 'terminal' : null);
     if (!n || !wire) return;
     if (wire.dir === 'out' && inPorts(n).length) connectEdge(wire.from, n.id, inPorts(n)[0]);
     if (wire.dir === 'in' && hasOut(n)) connectEdge(n.id, wire.to, wire.port);
