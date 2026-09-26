@@ -11,16 +11,18 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
-<link rel="stylesheet" href="style.css?v=6" />
+<link rel="stylesheet" href="style.css?v=7" />
 </head>
 <body>
 <header class="bar">
   <div class="brand"><span class="logo" aria-hidden="true"></span><b class="dotfont">FLOWBENCH</b></div>
+  <span class="flow-name" id="flow-name" title="Double-click to rename">untitled</span>
   <button class="pill" id="runner-pill" title="Local runner connection"><span class="led" id="runner-led"></span><span id="runner-label">RUNNER OFFLINE</span></button>
   <div class="grow"></div>
   <div class="btn-group">
     <button class="pill primary" id="run-all" data-icon="play" title="Run the whole workflow (Ctrl+Enter)">RUN</button>
     <button class="pill" id="run-sel" data-icon="play" title="Run the selected nodes (Shift+Enter)">SELECTED</button>
+    <button class="pill" id="auto-btn" data-icon="bolt" title="AUTO: re-run automatically after every change">AUTO</button>
     <button class="pill" id="stop" data-icon="stop" title="Stop and reset the Python kernel">STOP</button>
   </div>
   <div class="btn-group">
@@ -30,8 +32,9 @@
   <div class="btn-group">
     <button class="pill icon" id="undo" data-icon="undo" title="Undo (Ctrl+Z)" aria-label="Undo"></button>
     <button class="pill icon" id="redo" data-icon="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"></button>
-    <button class="pill" id="open-flow" data-icon="folder-open" title="Open a saved .flow.json">OPEN</button>
-    <button class="pill" id="save-flow" data-icon="save" title="Download this workflow (Ctrl+S)">SAVE</button>
+    <button class="pill icon" id="new-flow" data-icon="plus" title="New empty workflow" aria-label="New workflow"></button>
+    <button class="pill" id="open-flow" data-icon="folder-open" title="Open a workflow from your folders">OPEN</button>
+    <button class="pill" id="save-flow" data-icon="save" title="Save into your code folder (Ctrl+S saves again, Ctrl+Shift+S saves as)">SAVE</button>
     <button class="pill" id="tidy" data-icon="layout" title="Arrange the workflow neatly (T)">TIDY</button>
     <button class="pill" id="export-py" data-icon="file-code" title="Export the workflow as a normal Python script you can run anywhere">EXPORT .PY</button>
     <button class="pill icon" id="theme-btn" data-icon="theme" title="Light / dark" aria-label="Toggle light / dark"></button>
@@ -110,6 +113,12 @@ flowbench stop · status · update · help</pre></li>
     </table>
   </div>
 </div>
+<div class="modal" id="flows-modal" hidden>
+  <div class="dialog"><button class="x" data-close data-icon="close" aria-label="Close"></button><h2 class="dotfont">OPEN WORKFLOW</h2>
+    <div class="flow-list" id="flow-list"></div>
+    <div class="row"><button class="pill" id="open-file" data-icon="folder">FROM COMPUTER…</button></div>
+  </div>
+</div>
 <div class="modal" id="src-modal" hidden>
   <div class="dialog wide"><button class="x" data-close data-icon="close" aria-label="Close"></button><h2 class="mono" id="src-title"></h2><pre class="src" id="src-body"></pre></div>
 </div>
@@ -117,7 +126,7 @@ flowbench stop · status · update · help</pre></li>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-<script src="icons.js?v=2"></script>
-<script src="app.js?v=8"></script>
+<script src="icons.js?v=3"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>

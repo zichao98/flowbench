@@ -243,3 +243,19 @@ table.keys { width: 100%; border-collapse: collapse; margin-top: 10px; font-size
 table.keys td { padding: 7px 4px; border-bottom: 1px solid var(--line2); vertical-align: middle; }
 table.keys td:first-child { white-space: nowrap; color: var(--ink2); width: 44%; font-size: 12px; }
 kbd { font: 700 10.5px var(--mono); padding: 2px 6px; border-radius: 5px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--panel2); color: var(--ink); }
+
+/* ───── workflow name, AUTO, open list ───── */
+.flow-name { font: 500 12px var(--code); color: var(--ink2); padding: 4px 9px; border-radius: 7px; border: 1px dashed transparent; cursor: text; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-name:hover { border-color: var(--line); color: var(--ink); }
+.pill.on { border-color: var(--red); color: var(--ink); background: var(--red-soft); }
+.pill.on .ico { color: var(--red); }
+.flow-list { display: grid; gap: 6px; margin: 12px 0; max-height: 55vh; overflow: auto; }
+.flow-item { display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); color: var(--ink); }
+.flow-item:hover { border-color: var(--ink2); }
+.fi-ic { width: 30px; height: 30px; border-radius: 8px; background: var(--bg); display: grid; place-items: center; color: var(--ink2); flex: none; }
+.fi-ic .ico { width: 16px; height: 16px; }
+.fi-main { display: grid; min-width: 0; flex: 1; }
+.fi-main b { font: 600 13px var(--sans); }
+.fi-main small { font: 10.5px var(--code); color: var(--mute); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fi-t { font: 10px var(--mono); color: var(--mute); white-space: nowrap; }
+@media (max-width: 1250px) { .flow-name { display: none; } }

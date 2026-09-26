@@ -53,7 +53,9 @@
   const H = { past: [], future: [] };
   const snap = () => JSON.stringify({ nodes: S.nodes, edges: S.edges });
   let lastSnap = snap();
-  function commit() { const s = snap(); if (s === lastSnap) return; H.past.push(lastSnap); if (H.past.length > 80) H.past.shift(); H.future = []; lastSnap = s; save(); drawMinimap(); }
+  let autoOn = store.get('flowbench:auto', false), autoT = 0;
+  function autoRun() { if (!autoOn || !RC.ok) return; clearTimeout(autoT); autoT = setTimeout(() => { if (running) return autoRun(); run(null, false, true); }, 700); }
+  function commit() { const s = snap(); if (s === lastSnap) return; autoRun(); H.past.push(lastSnap); if (H.past.length > 80) H.past.shift(); H.future = []; lastSnap = s; save(); drawMinimap(); }
   function restore(s) { const o = JSON.parse(s); S.nodes = o.nodes; S.edges = o.edges; lastSnap = s; sel.clear(); selEdge = null; renderAll(); save(); }
   function undo() { if (!H.past.length) return; H.future.push(snap()); restore(H.past.pop()); }
   function redo() { if (!H.future.length) return; H.past.push(snap()); restore(H.future.pop()); }
@@ -490,7 +492,7 @@
     if (n.kind === 'terminal' && (f === 'shell' || f === 'cwd' || f === 'image')) startTerm(n, true);
     commit();
   });
-  nodesHost.addEventListener('keydown', e => { if (e.target.classList.contains('n-code') && e.key === 'Tab') { e.preventDefault(); const t = e.target, s = t.selectionStart; t.setRangeText('    ', s, t.selectionEnd, 'end'); t.dispatchEvent(new Event('input', { bubbles: true })); } });
+  nodesHost.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.matches('.pval, .n-field input')) { e.preventDefault(); e.target.blur(); return; } if (e.target.classList.contains('n-code') && e.key === 'Tab') { e.preventDefault(); const t = e.target, s = t.selectionStart; t.setRangeText('    ', s, t.selectionEnd, 'end'); t.dispatchEvent(new Event('input', { bubbles: true })); } });
   nodesHost.addEventListener('focusout', e => { if (e.target.matches('textarea, input')) commit(); });
   nodesHost.addEventListener('click', async e => {
     const b = e.target.closest('[data-act]'); if (!b) return; const el = b.closest('.node'), n = node(el.dataset.id), act = b.dataset.act;
@@ -529,7 +531,7 @@
 
   /* ───────── Run ───────── */
   let running = false;
-  async function run(targets, force) {
+  async function run(targets, force, quiet) {
     if (!RC.ok) { openConnect(); return; }
     if (running) { toast('Already running · press STOP to cancel'); return; }
     const nodes = S.nodes.filter(n => ['func', 'code', 'value', 'viewer'].includes(n.kind));
@@ -537,7 +539,7 @@
     running = true; setStatus('busy'); $('#run-all').disabled = true;
     const r = await req('run', { nodes: nodes.map(n => ({ id: n.id, kind: n.kind, data: n.data })), edges: S.edges.map(e => ({ from: e.from, to: e.to, port: e.port })), targets: targets || null, force: !!force });
     running = false; $('#run-all').disabled = false; setStatus(RC.ok ? 'on' : 'off'); renderEdges();
-    if (r.error) toast(r.error, 4000); else if (r.failed) toast(r.failed + ' node' + (r.failed > 1 ? 's' : '') + ' failed · see the red messages'); else toast('✓ Workflow finished');
+    if (r.error) toast(r.error, 4000); else if (r.failed) toast(r.failed + ' node' + (r.failed > 1 ? 's' : '') + ' failed · see the red messages'); else if (!quiet) toast('✓ Workflow finished');
   }
   function onNodeEvent(m) {
     const r = R[m.nid] = R[m.nid] || {};
@@ -672,22 +674,60 @@
   mm.addEventListener('pointerup', () => { mmDrag = false; });
 
   /* ───────── Save / open ───────── */
-  $('#save-flow').onclick = () => {
-    const name = (prompt('File name', 'workflow') || '').trim(); if (!name) return;
-    const blob = new Blob([JSON.stringify({ flowbench: 1, nodes: S.nodes, edges: S.edges, view: S.view }, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name.replace(/\.flow\.json$|\.json$/i, '') + '.flow.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+  const flowData = name => ({ flowbench: 1, name: name || S.name || '', nodes: S.nodes, edges: S.edges, view: S.view });
+  function setName(name, path) { S.name = name || ''; S.path = path || null; $('#flow-name').textContent = S.name || 'untitled'; $('#flow-name').title = (S.path || 'not saved yet') + '\n\nDouble-click to rename'; save(); }
+  function loadFlow(o, label, path) {
+    if (!o || !Array.isArray(o.nodes) || !Array.isArray(o.edges)) throw new Error('not a Flowbench file');
+    Object.keys(TERMS).forEach(closeTerm); Object.keys(R).forEach(k => delete R[k]);
+    commit(); S.nodes = o.nodes; S.edges = o.edges; if (o.view) S.view = o.view; renderAll(); commit();
+    setName(o.name || String(label).replace(/\.flow\.json$|\.json$/i, ''), path);
+    S.nodes.filter(n => n.kind === 'terminal').forEach(n => startTerm(n));
+    toast('Opened ' + (o.name || label));
+  }
+  async function saveFlow(ask) {
+    let name = S.name;
+    if (ask || !name) { name = (prompt('Workflow name', name || 'workflow') || '').trim(); if (!name) return; }
+    const data = flowData(name);
+    if (RC.ok) {
+      const same = !ask && S.path && name === S.name;
+      const r = await req('save-flow', same ? { path: S.path, data } : { name, data });
+      if (!r.ok) return toast(r.error, 4000);
+      setName(name, r.path); toast('Saved · ' + r.path, 3500); return;
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const el = document.createElement('a'); el.href = URL.createObjectURL(blob); el.download = name.replace(/\.flow\.json$|\.json$/i, '') + '.flow.json'; el.click(); setTimeout(() => URL.revokeObjectURL(el.href), 3000);
+    setName(name, null);
+  }
+  $('#save-flow').onclick = () => saveFlow(true);
+  $('#open-flow').onclick = async () => {
+    if (!RC.ok) return $('#file-in').click();
+    const r = await req('flows'); const list = r.ok ? r.flows : [];
+    const ago = t => { const m = Math.round((Date.now() / 1000 - t) / 60); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
+    $('#flow-list').innerHTML = list.length ? list.map(f => `<button class="flow-item" data-path="${esc(f.path)}"><span class="fi-ic">${ICON('layout')}</span><span class="fi-main"><b>${esc(f.name)}</b><small>${esc(dir(f.path))}</small></span><small class="fi-t">${ago(f.mtime)}</small></button>`).join('')
+      : '<p class="fine">No saved workflows in your folders yet. Use SAVE and they will appear here.</p>';
+    $('#flows-modal').hidden = false;
   };
-  $('#open-flow').onclick = () => $('#file-in').click();
+  $('#flow-list').addEventListener('click', async e => {
+    const it = e.target.closest('[data-path]'); if (!it) return;
+    const r = await req('load-flow', { path: it.dataset.path }); if (!r.ok) return toast(r.error);
+    $('#flows-modal').hidden = true;
+    try { loadFlow(r.data, base(r.path), r.path); } catch (err) { toast('Could not open: ' + err.message); }
+  });
+  $('#open-file').onclick = () => { $('#flows-modal').hidden = true; $('#file-in').click(); };
   $('#file-in').onchange = async e => {
     const f = e.target.files[0]; e.target.value = ''; if (!f) return;
-    try {
-      const o = JSON.parse(await f.text()); if (!Array.isArray(o.nodes) || !Array.isArray(o.edges)) throw new Error('not a Flowbench file');
-      Object.keys(TERMS).forEach(closeTerm); Object.keys(R).forEach(k => delete R[k]);
-      commit(); S.nodes = o.nodes; S.edges = o.edges; if (o.view) S.view = o.view; renderAll(); commit();
-      S.nodes.filter(n => n.kind === 'terminal').forEach(n => startTerm(n)); toast('Opened ' + f.name);
-    } catch (err) { toast('Could not open: ' + err.message); }
+    try { loadFlow(JSON.parse(await f.text()), f.name, null); } catch (err) { toast('Could not open: ' + err.message); }
+  };
+  $('#flow-name').addEventListener('dblclick', () => { const v = (prompt('Rename workflow', S.name || 'workflow') || '').trim(); if (v) setName(v, null); });
+  $('#new-flow').onclick = () => {
+    if (S.nodes.length && !confirm('Start a new, empty workflow? (Your current one stays in undo history until you reload.)')) return;
+    Object.keys(TERMS).forEach(closeTerm); Object.keys(R).forEach(k => delete R[k]);
+    commit(); S.nodes = []; S.edges = []; S.view = { x: 60, y: 40, k: 1 }; renderAll(); commit(); setName('', null);
   };
 
+  /* ───────── AUTO: re-run after every change ───────── */
+  function renderAuto() { $('#auto-btn').classList.toggle('on', autoOn); }
+  $('#auto-btn').onclick = () => { autoOn = !autoOn; store.set('flowbench:auto', autoOn); renderAuto(); toast(autoOn ? 'AUTO on · edits re-run what they affect' : 'AUTO off'); if (autoOn) autoRun(); };
 
   /* ───────── Tidy: arrange the workflow left → right in data-flow order ───────── */
   function tidy() {
@@ -790,6 +830,7 @@
     if (tg.closest('input, textarea, select, .xterm, .palette')) {
       if (e.key === 'Escape') e.target.blur();
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(null); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveFlow(e.shiftKey); }
       return;
     }
     const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
@@ -800,7 +841,7 @@
     else if (mod && k === 'v') paste();
     else if (mod && k === 'd') { e.preventDefault(); copySel(); paste(); }
     else if (mod && k === 'a') { e.preventDefault(); S.nodes.forEach(n => sel.add(n.id)); markSel(); }
-    else if (mod && k === 's') { e.preventDefault(); $('#save-flow').click(); }
+    else if (mod && k === 's') { e.preventDefault(); saveFlow(e.shiftKey); }
     else if (k === 'enter' && mod) { e.preventDefault(); run(null); }
     else if (k === 'enter' && e.shiftKey) { e.preventDefault(); $('#run-sel').click(); }
     else if (k === 'f') fit();
@@ -829,7 +870,7 @@
     S.nodes = [note, v, c, w]; S.edges = [{ id: uid(), from: v.id, to: c.id, port: 'x' }, { id: uid(), from: c.id, to: w.id, port: 'data' }];
     lastSnap = snap(); save();
   }
-  renderAll(); renderLib(); setStatus('off');
+  renderAll(); renderLib(); setStatus('off'); setName(S.name, S.path); renderAuto();
   requestAnimationFrame(() => { if (firstRun) fit(); renderEdges(); drawMinimap(); });
   window.addEventListener('resize', () => { applyView(); });
   connect();

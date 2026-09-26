@@ -622,6 +622,23 @@ class Session:
             elif t == "engine":
                 await detect_engine()
                 reply(ok=True, engine=self.engine_info(), langs=self.langs())
+            elif t == "flows":
+                reply(ok=True, flows=await asyncio.to_thread(self.list_flows))
+            elif t == "save-flow":
+                if msg.get("path"):
+                    target = self.safe(msg["path"])
+                else:
+                    name = "".join(c for c in str(msg.get("name") or "workflow") if c.isalnum() or c in " -_.").strip(" .") or "workflow"
+                    target = self.cfg.roots[0] / "flows" / (name + ".flow.json")
+                    self.safe(target)
+                if not target.name.endswith(".flow.json"):
+                    raise ValueError("Workflow files must end with .flow.json")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(json.dumps(msg.get("data", {}), indent=1, ensure_ascii=False), encoding="utf-8")
+                reply(ok=True, path=str(target))
+            elif t == "load-flow":
+                p = self.safe(msg["path"])
+                reply(ok=True, path=str(p), data=json.loads(p.read_text(encoding="utf-8")))
             elif t == "run":
                 if self.running:
                     return reply(ok=False, error="A run is already in progress")
@@ -671,6 +688,21 @@ class Session:
                 asyncio.ensure_future(asyncio.create_subprocess_exec(ENGINE["path"], "rm", "-f", c,
                                                                      stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL))
         self.containers.clear()
+
+    def list_flows(self):
+        found = []
+        for root in self.cfg.roots:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS]
+                if len(Path(dirpath).relative_to(root).parts) >= 4:
+                    dirnames[:] = []
+                for fn in filenames:
+                    if fn.endswith(".flow.json"):
+                        p = os.path.join(dirpath, fn)
+                        found.append({"path": p, "name": fn[:-10], "mtime": os.path.getmtime(p)})
+                if len(found) > 300:
+                    break
+        return sorted(found, key=lambda f: -f["mtime"])
 
     def build_index(self):
         files, count = [], 0
