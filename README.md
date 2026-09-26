@@ -27,6 +27,18 @@ The runner prints a link with a token and opens the app, which connects automati
 | Terminal | A real shell (PowerShell / cmd / Python / bash). |
 | Note | A sticky note. |
 
+## Languages
+
+Code nodes have a language picker. Anything installed on your computer runs directly; tick **CONTAINER** to run a node in Podman/Docker instead (any image, e.g. R, Julia, Go, Java without installing them). Set Podman up once with `flowbench podman`.
+
+| Language | How data comes in / goes out |
+| --- | --- |
+| Python (default) | Inputs are variables, set `result`. Runs in a persistent kernel; matplotlib plots are captured. |
+| JavaScript, TypeScript | Inputs are variables, set `result` (Node.js; TypeScript types are stripped). |
+| PowerShell, Bash, Rust, C, C++, Go, R, Julia, Java, Shell | A normal program: inputs are in the JSON file `$FLOW_IN`; what it prints is the result (JSON is parsed). |
+
+Values move between languages as JSON automatically (numpy arrays → lists, DataFrames → records). Any language can save images into `$FLOW_OUT` and they appear on the canvas. Script files in your folders (`.js`, `.ts`, `.sh`, `.ps1`, `.rs`, `.c`, `.cpp`, `.go`, `.R`, `.jl`, `.java`) show up in the library and can be dragged in; they run as programs. Independent branches run in parallel.
+
 Matplotlib figures, pandas tables, numpy arrays (with an inline line chart for 1-D data) and PIL images are rendered inside the nodes. Results are cached: re-running only recomputes nodes whose inputs, code or source file changed.
 
 ## Security

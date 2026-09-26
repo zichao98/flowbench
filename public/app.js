@@ -27,6 +27,25 @@
   const node = id => S.nodes.find(n => n.id === id);
   const inPorts = n => n.kind === 'func' ? (n.data.params || []).map(p => p.name) : n.kind === 'code' ? (n.data.inputs || '').split(',').map(s => s.trim()).filter(Boolean) : n.kind === 'viewer' ? ['data'] : [];
   const hasOut = n => ['func', 'value', 'code', 'viewer'].includes(n.kind);
+
+  /* languages for Code nodes (runner.py has the matching runtime table) */
+  const LANGS = {
+    python: { label: 'Python', tier: 'vars', image: 'python:3.12-slim', tpl: '# inputs become variables; assign your output to `result`\nresult = x' },
+    javascript: { label: 'JavaScript', short: 'JS', tier: 'vars', image: 'node:22-alpine', tpl: '// inputs are variables; set `result` to pass data on\nresult = x.map(v => v * 2);' },
+    typescript: { label: 'TypeScript', short: 'TS', tier: 'vars', image: 'node:24-alpine', tpl: '// inputs are variables; set `result` to pass data on\nconst xs: number[] = x;\nresult = xs.map((v: number) => v * 2);' },
+    powershell: { label: 'PowerShell', short: 'PS', tier: 'prog', image: 'mcr.microsoft.com/powershell', tpl: '# $env:FLOW_IN is a JSON file with the inputs; whatever you print is the result\n$in = Get-Content $env:FLOW_IN -Raw | ConvertFrom-Json\n@{ count = @($in.x).Count } | ConvertTo-Json -Compress' },
+    bash: { label: 'Bash', short: 'SH', tier: 'prog', image: 'bash:5', tpl: '# $FLOW_IN is a JSON file with the inputs; whatever you print is the result\n# images saved into $FLOW_OUT show up on the canvas\necho "{\\"inputs\\": $(cat "$FLOW_IN")}"' },
+    rust: { label: 'Rust', short: 'RS', tier: 'prog', image: 'rust:1-slim', tpl: 'use std::{env, fs};\n\nfn main() {\n    // $FLOW_IN is a JSON file with the inputs; print the result (JSON is parsed)\n    let input = fs::read_to_string(env::var("FLOW_IN").unwrap()).unwrap_or_default();\n    let sum: u64 = (1..=100).sum();\n    println!("{{\\"sum\\": {}, \\"input_bytes\\": {}}}", sum, input.len());\n}' },
+    c: { label: 'C', tier: 'prog', image: 'gcc:14', tpl: '#include <stdio.h>\n#include <math.h>\n\nint main(void) {\n    /* getenv("FLOW_IN") is a JSON file with the inputs; print the result */\n    printf("{\\"sqrt2\\": %.6f}\\n", sqrt(2.0));\n    return 0;\n}' },
+    cpp: { label: 'C++', tier: 'prog', image: 'gcc:14', tpl: '#include <iostream>\n#include <numeric>\n#include <vector>\n\nint main() {\n    // getenv("FLOW_IN") is a JSON file with the inputs; print the result\n    std::vector<int> v{1, 2, 3, 4};\n    std::cout << "{\\"sum\\": " << std::accumulate(v.begin(), v.end(), 0) << "}" << std::endl;\n}' },
+    go: { label: 'Go', tier: 'prog', image: 'golang:1.23-alpine', tpl: 'package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n\t"os"\n)\n\nfunc main() {\n\t// $FLOW_IN is a JSON file with the inputs; print the result (JSON is parsed)\n\traw, _ := os.ReadFile(os.Getenv("FLOW_IN"))\n\tvar in map[string]any\n\tjson.Unmarshal(raw, &in)\n\tout, _ := json.Marshal(map[string]any{"inputs": len(in)})\n\tfmt.Println(string(out))\n}' },
+    r: { label: 'R', tier: 'prog', image: 'r-base', tpl: '# Sys.getenv("FLOW_IN") is a JSON file with the inputs; whatever you print is the result\n# plots saved into FLOW_OUT appear on the canvas\npng(file.path(Sys.getenv("FLOW_OUT"), "plot.png"), width = 640, height = 360)\nplot(sin(seq(0, 10, 0.1)), type = "l", col = "red")\ninvisible(dev.off())\ncat(sum(1:10))' },
+    julia: { label: 'Julia', short: 'JL', tier: 'prog', image: 'julia:1', tpl: '# ENV["FLOW_IN"] is a JSON file with the inputs; print the result\nprintln(sum(1:10))' },
+    java: { label: 'Java', tier: 'prog', image: 'eclipse-temurin:21', tpl: '// System.getenv("FLOW_IN") is a JSON file with the inputs; print the result\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println("{\\"answer\\": " + (6 * 7) + "}");\n    }\n}' },
+    shell: { label: 'Shell (container)', short: 'SH', tier: 'prog', image: 'alpine:3', tpl: '# runs inside the container image; $FLOW_IN is a JSON file with the inputs\necho "hello from $(uname -sm)"' }
+  };
+  const langOf = n => (n.data && n.data.lang) || 'python';
+  const isTpl = code => !String(code || '').trim() || Object.values(LANGS).some(L => L.tpl === code);
   let saveT = 0;
   function save() { clearTimeout(saveT); saveT = setTimeout(() => store.set('flowbench:flow', S), 300); }
 
@@ -45,7 +64,7 @@
   const RC = { url: LOCAL ? 'ws://' + location.host : store.get('flowbench:url', 'ws://127.0.0.1:8765'), token: store.get('flowbench:token', ''), ws: null, ok: false, info: null, pend: new Map(), seq: 0, retry: 0, timer: 0 };
   (function readHash() {
     const h = new URLSearchParams(location.hash.slice(1));
-    if (h.get('token')) { RC.token = h.get('token'); RC.url = LOCAL ? RC.url : (h.get('runner') || RC.url); store.set('flowbench:token', RC.token); store.set('flowbench:url', RC.url); history.replaceState(null, '', location.pathname); }
+    if (h.get('token')) { RC.token = h.get('token'); RC.url = h.get('runner') || RC.url; store.set('flowbench:token', RC.token); store.set('flowbench:url', RC.url); history.replaceState(null, '', location.pathname); }
   })();
   function setStatus(s) {
     const led = $('#runner-led'), lab = $('#runner-label');
@@ -66,6 +85,7 @@
       RC.ok = true; RC.info = r; RC.retry = 0; setStatus('on'); toast('Connected to runner · ' + r.roots.length + ' folder' + (r.roots.length > 1 ? 's' : ''));
       $('#connect-modal').hidden = true;
       LIB.roots = r.roots; LIB.index = null; renderLib();
+      S.nodes.filter(n => n.kind === 'code').forEach(renderNode);
       S.nodes.filter(n => n.kind === 'terminal').forEach(n => startTerm(n));
     };
     ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
@@ -128,12 +148,14 @@
       if (it.dir) kids.push(await dirHTML(it.path, it.name, depth + 1));
       else {
         const fo = LIB.open.has(it.path);
+        if (it.lang) { kids.push(scriptItem(it)); continue; }
         kids.push(`<div class="ti file" data-file="${esc(it.path)}" title="${esc(it.path)}"><span class="tw">${ICON(fo ? 'chevron-down' : 'chevron-right')}</span><span class="ic">${ICON('file')}</span>${esc(it.name)}</div>`);
         if (fo) { const fs = await scanFile(it.path); kids.push(`<div class="kids">${fs.length ? fs.map(f => fnItem(it.path, f)).join('') : '<div class="ti"><small style="color:var(--mute)">no public functions</small></div>'}</div>`); }
       }
     }
     return h + `<div class="kids">${kids.join('') || '<div class="ti"><small style="color:var(--mute)">empty</small></div>'}</div>`;
   }
+  const scriptItem = it => `<div class="ti script" draggable="true" data-script="${esc(it.path)}" data-lang="${it.lang}" title="${esc(it.path + '\n\nDrag onto the canvas, or click to add')}"><span class="tw"></span><span class="ic">${ICON('file-code')}</span>${esc(it.name)}<small class="tag">${esc((LANGS[it.lang] || {}).short || (LANGS[it.lang] || {}).label || it.lang)}</small></div>`;
   const fnItem = (file, f) => `<div class="ti fn" draggable="true" data-fn="${esc(f.name)}" data-fnfile="${esc(file)}" title="${esc((f.doc || f.name) + '\n\nDrag onto the canvas, or click to add')}"><span class="tw"></span><span class="ic">${ICON('func')}</span>${esc(f.name)}<small>(${esc(f.params.map(p => p.name).join(', '))})</small></div>`;
   async function ensureIndex() { if (LIB.index && Date.now() - LIB.indexAt < 30000) return LIB.index; const r = await req('index'); LIB.index = r.ok ? r.files : []; LIB.indexAt = Date.now(); return LIB.index; }
   async function renderSearch(q) {
@@ -143,14 +165,15 @@
     tree.innerHTML = rows.length ? rows.slice(0, 300).map(r => `<div class="ti fn" draggable="true" data-fn="${esc(r.fn)}" data-fnfile="${esc(r.file)}" title="${esc(r.file)}"><span class="tw"></span><span class="ic">${ICON('func')}</span>${esc(r.fn)}<small>${esc(base(r.file))}</small></div>`).join('') : '<div class="lib-empty">No functions match.</div>';
   }
   $('#lib-tree').addEventListener('click', async e => {
-    const d = e.target.closest('[data-dir]'), f = e.target.closest('[data-file]'), fn = e.target.closest('[data-fn]');
+    const d = e.target.closest('[data-dir]'), f = e.target.closest('[data-file]'), fn = e.target.closest('[data-fn]'), sc = e.target.closest('[data-script]');
+    if (sc) { const c = viewCenter(); addScriptNode(sc.dataset.script, sc.dataset.lang, c.x - 170, c.y - 120); return; }
     if (d) { const p = d.dataset.dir, isRoot = LIB.roots.includes(p); if (isRoot) { LIB.open.has('!' + p) ? LIB.open.delete('!' + p) : LIB.open.add('!' + p); } else { LIB.open.has(p) ? LIB.open.delete(p) : LIB.open.add(p); } }
     else if (f) { const p = f.dataset.file; LIB.open.has(p) ? LIB.open.delete(p) : LIB.open.add(p); }
     else if (fn) { const c = viewCenter(); await addFuncNode(fn.dataset.fnfile, fn.dataset.fn, c.x - 130, c.y - 60); return; }
     else return;
     store.set('flowbench:open', [...LIB.open]); renderLib();
   });
-  $('#lib-tree').addEventListener('dragstart', e => { const fn = e.target.closest('[data-fn]'); if (!fn) return; e.dataTransfer.setData('text/x-flowbench', JSON.stringify({ file: fn.dataset.fnfile, func: fn.dataset.fn })); e.dataTransfer.effectAllowed = 'copy'; });
+  $('#lib-tree').addEventListener('dragstart', e => { const sc = e.target.closest('[data-script]'); if (sc) { e.dataTransfer.setData('text/x-flowbench', JSON.stringify({ script: sc.dataset.script, lang: sc.dataset.lang })); e.dataTransfer.effectAllowed = 'copy'; return; } const fn = e.target.closest('[data-fn]'); if (!fn) return; e.dataTransfer.setData('text/x-flowbench', JSON.stringify({ file: fn.dataset.fnfile, func: fn.dataset.fn })); e.dataTransfer.effectAllowed = 'copy'; });
   let sT = 0; $('#lib-search').addEventListener('input', () => { clearTimeout(sT); sT = setTimeout(renderLib, 220); });
   $('#lib-refresh').onclick = () => { LIB.kids = {}; LIB.funcs = {}; LIB.index = null; renderLib(); };
   $('#lib-toggle').onclick = () => { $('#lib').classList.add('hide'); document.body.classList.add('lib-hidden'); setTimeout(applyView, 260); };
@@ -162,10 +185,12 @@
     if (!f) { toast('Function not found: ' + func); return null; }
     return addNode('func', x, y, { file, func, params: f.params, doc: f.doc, ret: f.ret, line: f.line, values: {} }, func);
   }
+  function addScriptNode(file, lang, x, y) { return addNode('code', x, y, { lang, file, inputs: '', values: {} }, base(file)); }
   function addNode(kind, x, y, data, title) {
     const k = KIND[kind], n = { id: uid(), kind, x: Math.round(x), y: Math.round(y), w: k.w, title: title || k.label.toLowerCase(), data: data || {} };
     if (k.h) n.h = k.h;
-    if (kind === 'code' && !n.data.code) Object.assign(n.data, { code: '# inputs become variables; assign your output to `result`\nresult = x', inputs: 'x', values: {} });
+    if (kind === 'code' && !n.data.code && !n.data.file) { const L = LANGS[n.data.lang || 'python']; Object.assign(n.data, { code: L.tpl, inputs: n.data.inputs != null ? n.data.inputs : (L.tier === 'vars' ? 'x' : ''), values: n.data.values || {} }); }
+    if (kind === 'code' && n.data.file && n.data.inputs == null) Object.assign(n.data, { inputs: '', values: {} });
     if (kind === 'value' && n.data.expr == null) n.data.expr = '42';
     if (kind === 'terminal') Object.assign(n.data, { shell: n.data.shell || 'default', cwd: n.data.cwd || (RC.info ? RC.info.roots[0] : '') });
     if (kind === 'note' && n.data.text == null) n.data.text = '';
@@ -220,7 +245,7 @@
   const nodeEl = id => nodesHost.querySelector(`.node[data-id="${id}"]`);
   function headHTML(n) {
     const k = KIND[n.kind], st = (R[n.id] || {}).status || '';
-    const sub = n.kind === 'func' ? base(n.data.file) : n.kind === 'terminal' ? '' : '';
+    const sub = n.kind === 'func' ? base(n.data.file) : n.kind === 'code' ? (LANGS[langOf(n)] || LANGS.python).label.replace(' (container)', '') + (n.data.container || langOf(n) === 'shell' ? ' · container' : '') : '';
     const btns = [];
     if (['func', 'code', 'value', 'viewer'].includes(n.kind)) btns.push(`<button class="n-btn" data-act="run" title="Run this node and everything it needs">${ICON('play')}</button>`);
     if (n.kind === 'func') btns.push(`<button class="n-btn" data-act="src" title="View source">${ICON('code')}</button><button class="n-btn" data-act="termhere" title="Open a terminal in this file's folder">${ICON('terminal')}</button>`);
@@ -236,9 +261,23 @@
       h += '<div class="ports">' + (n.data.params || []).map(p => `<div class="port in ${linked.has(p.name) ? 'linked' : ''}" data-port="${esc(p.name)}"><i class="pdot" data-in="${esc(p.name)}"></i><span class="pname">${esc(p.name)}${p.ann ? `<small>: ${esc(p.ann)}</small>` : ''}</span><input class="pval" data-val="${esc(p.name)}" value="${esc((n.data.values || {})[p.name] || '')}" placeholder="${esc(p.default != null ? p.default : 'required')}" spellcheck="false"></div>`).join('');
       h += `<div class="port out"><span class="pname"><small>return${n.data.ret ? ': ' + esc(n.data.ret) : ''}</small></span><i class="pdot" data-out="1"></i></div></div>`;
     } else if (n.kind === 'code') {
+      const lang = langOf(n), L = LANGS[lang] || LANGS.python, box = !!n.data.container || lang === 'shell';
+      const avail = RC.info && RC.info.langs ? RC.info.langs[lang] : null, eng = RC.info && RC.info.engine;
+      h += `<div class="n-field">LANG <select data-f="lang">${Object.entries(LANGS).map(([k, v]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${v.label}</option>`).join('')}</select>`
+        + (lang === 'shell' ? '' : `<label class="n-check" title="Run this node inside a Podman / Docker container"><input type="checkbox" data-f="container" ${n.data.container ? 'checked' : ''}>${ICON('box')}CONTAINER</label>`) + '</div>';
+      if (box) h += `<div class="n-field">IMAGE <input data-f="image" value="${esc(n.data.image || '')}" placeholder="${esc(L.image)}" spellcheck="false"></div>`;
+      let warn = '';
+      if (box && eng && !eng.ok) warn = `Containers aren’t ready (${esc(eng.detail || 'unknown')}). Run <code>flowbench podman</code> once.`;
+      else if (!box && lang !== 'python' && avail === false) warn = `${L.label} isn’t installed on this computer. Tick CONTAINER to run it with Podman.`;
+      const how = n.data.file ? 'Runs the file · inputs: JSON file <code>FLOW_IN</code> · what it prints is the result'
+        : lang === 'python' && !box ? 'Inputs are variables · set <code>result</code> · matplotlib plots are captured'
+        : L.tier === 'vars' ? 'Inputs are variables · set <code>result</code> · images saved to <code>FLOW_OUT</code> show here'
+        : 'Inputs: JSON file <code>FLOW_IN</code> · print the result · images in <code>FLOW_OUT</code> show here';
+      h += `<div class="n-hint${warn ? ' warn' : ''}">${warn || how}</div>`;
       h += `<div class="n-field">INPUTS <input data-f="inputs" value="${esc(n.data.inputs || '')}" placeholder="x, y" spellcheck="false"></div>`;
       h += '<div class="ports">' + inPorts(n).map(p => `<div class="port in ${linked.has(p) ? 'linked' : ''}" data-port="${esc(p)}"><i class="pdot" data-in="${esc(p)}"></i><span class="pname">${esc(p)}</span><input class="pval" data-val="${esc(p)}" value="${esc((n.data.values || {})[p] || '')}" placeholder="value if not wired" spellcheck="false"></div>`).join('') + '</div>';
-      h += `<div style="display:flex;flex-direction:column;flex:1;min-height:0;padding:0 10px 4px"><textarea class="n-code" data-f="code" spellcheck="false">${esc(n.data.code || '')}</textarea></div>`;
+      if (n.data.file) h += `<div class="n-filebar">${ICON('file-code')}<span title="${esc(n.data.file)}">${esc(base(n.data.file))}</span><button class="mini-btn" data-act="src">VIEW</button><button class="mini-btn" data-act="inline">EDIT HERE</button></div>`;
+      else h += `<div style="display:flex;flex-direction:column;flex:1;min-height:0;padding:0 10px 4px"><textarea class="n-code" data-f="code" spellcheck="false">${esc(n.data.code || '')}</textarea></div>`;
       h += `<div class="ports"><div class="port out"><span class="pname"><small>result</small></span><i class="pdot" data-out="1"></i></div></div>`;
     } else if (n.kind === 'value') {
       h += `<div class="n-field" style="padding-top:2px">PYTHON <input data-f="expr" value="${esc(n.data.expr || '')}" placeholder="42, 'text', [1, 2], np.linspace(0, 1, 50)" spellcheck="false"></div>`;
@@ -246,7 +285,7 @@
     } else if (n.kind === 'viewer') {
       h += `<div class="ports"><div class="port in ${linked.has('data') ? 'linked' : ''}" data-port="data"><i class="pdot" data-in="data"></i><span class="pname">data</span></div><div class="port out"><span class="pname"><small>pass-through</small></span><i class="pdot" data-out="1"></i></div></div>`;
     } else if (n.kind === 'terminal') {
-      h += `<div class="n-field">SHELL <select data-f="shell"><option value="default">default shell</option><option value="powershell">PowerShell</option><option value="cmd">cmd</option><option value="python">Python</option><option value="bash">bash</option></select> CWD <input data-f="cwd" value="${esc(n.data.cwd || '')}" spellcheck="false"></div><div class="term-host"></div>`;
+      h += `<div class="n-field">SHELL <select data-f="shell"><option value="default">default shell</option><option value="powershell">PowerShell</option><option value="cmd">cmd</option><option value="python">Python</option><option value="bash">bash</option><option value="container">container</option></select> CWD <input data-f="cwd" value="${esc(n.data.cwd || '')}" spellcheck="false"></div>${n.data.shell === 'container' ? `<div class="n-field">IMAGE <input data-f="image" value="${esc(n.data.image || '')}" placeholder="python:3.12-slim" spellcheck="false"></div>` : ''}<div class="term-host"></div>`;
     } else if (n.kind === 'note') {
       h += `<textarea class="n-note" data-f="text" placeholder="Write a note…">${esc(n.data.text || '')}</textarea>`;
     }
@@ -280,7 +319,7 @@
       if (p.type) meta.push(esc(p.type) + (p.shape ? ' ' + esc(JSON.stringify(p.shape)) : '') + (p.dtype ? ' ' + esc(p.dtype) : ''));
       h += `<div class="n-meta">${meta.join(' · ')}</div>`;
       if (r.error) h += `<div class="n-err">${esc(r.error)}</div>`;
-      if (p.images) h += p.images.map(src => `<img class="n-img" src="data:image/png;base64,${src}" alt="plot">`).join('');
+      if (p.images) h += p.images.map(src => `<img class="n-img" src="${src.startsWith('data:') ? src : 'data:image/png;base64,' + src}" alt="plot">`).join('');
       if (p.html) h += `<div class="n-tbl">${p.html}</div>`;
       if (p.plot && !p.images) h += '<canvas class="n-plot"></canvas>';
       if (p.text != null && !p.html) h += (n.kind === 'viewer' || !p.images) ? `<div class="n-text">${esc(p.text)}</div>` : '';
@@ -426,20 +465,28 @@
   stage.addEventListener('dragover', e => { if (e.dataTransfer.types.includes('text/x-flowbench')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } });
   stage.addEventListener('drop', async e => {
     const raw = e.dataTransfer.getData('text/x-flowbench'); if (!raw) return; e.preventDefault();
-    const d = JSON.parse(raw), p = toWorld(e.clientX, e.clientY); await addFuncNode(d.file, d.func, p.x - 40, p.y - 20);
+    const d = JSON.parse(raw), p = toWorld(e.clientX, e.clientY);
+    if (d.script) addScriptNode(d.script, d.lang, p.x - 40, p.y - 20); else await addFuncNode(d.file, d.func, p.x - 40, p.y - 20);
   });
 
   /* node inputs & buttons (delegated) */
   nodesHost.addEventListener('input', e => {
     const el = e.target.closest('.node'); if (!el) return; const n = node(el.dataset.id);
     if (e.target.dataset.val != null) { n.data.values = n.data.values || {}; n.data.values[e.target.dataset.val] = e.target.value; }
-    else if (e.target.dataset.f) { n.data[e.target.dataset.f] = e.target.value; }
+    else if (e.target.dataset.f) { n.data[e.target.dataset.f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; }
     save();
   });
   nodesHost.addEventListener('change', e => {
     const el = e.target.closest('.node'); if (!el) return; const n = node(el.dataset.id), f = e.target.dataset.f;
     if (f === 'inputs') { const keep = new Set(inPorts(n)); S.edges = S.edges.filter(x => x.to !== n.id || keep.has(x.port)); renderNode(n); }
-    if (n.kind === 'terminal' && (f === 'shell' || f === 'cwd')) startTerm(n, true);
+    if (n.kind === 'code' && f === 'lang') {
+      const L = LANGS[langOf(n)];
+      if (!n.data.file && isTpl(n.data.code)) { n.data.code = L.tpl; if (!String(n.data.inputs || '').trim() || n.data.inputs === 'x') n.data.inputs = L.tier === 'vars' ? 'x' : ''; }
+      renderNode(n);
+    }
+    if (n.kind === 'code' && f === 'container') renderNode(n);
+    if (n.kind === 'terminal' && f === 'shell') renderNode(n);
+    if (n.kind === 'terminal' && (f === 'shell' || f === 'cwd' || f === 'image')) startTerm(n, true);
     commit();
   });
   nodesHost.addEventListener('keydown', e => { if (e.target.classList.contains('n-code') && e.key === 'Tab') { e.preventDefault(); const t = e.target, s = t.selectionStart; t.setRangeText('    ', s, t.selectionEnd, 'end'); t.dispatchEvent(new Event('input', { bubbles: true })); } });
@@ -451,6 +498,7 @@
     if (act === 'src') showSource(n.data.file, n.data.line);
     if (act === 'termhere') addNode('terminal', n.x + n.w + 40, n.y, { cwd: dir(n.data.file) }, 'terminal');
     if (act === 'restart') startTerm(n, true);
+    if (act === 'inline') { const r = await req('read', { path: n.data.file }); if (!r.ok) return toast(r.error); n.data.code = r.text; delete n.data.file; renderNode(n); commit(); toast('Copied into the node · the original file is unchanged'); }
   });
   nodesHost.addEventListener('dblclick', e => {
     const t = e.target.closest('.n-title'); if (!t) return; const n = node(t.closest('.node').dataset.id);
@@ -533,7 +581,7 @@
     t.tid = n.id + '-' + uid(); t.alive = true;
     if (restart) t.xt.reset();
     fitTerm(t, true);
-    req('term-open', { tid: t.tid, shell: n.data.shell || 'default', cwd: n.data.cwd || '', cols: t.xt.cols, rows: t.xt.rows }).then(r => {
+    req('term-open', { tid: t.tid, shell: n.data.shell || 'default', image: n.data.image || '', cwd: n.data.cwd || '', cols: t.xt.cols, rows: t.xt.rows }).then(r => {
       if (!r.ok) { t.alive = false; t.xt.write('\x1b[31m' + r.error + '\x1b[0m\r\n'); }
       else if (r.cwd && r.cwd !== n.data.cwd) { n.data.cwd = r.cwd; const inp = $('input[data-f="cwd"]', nodeEl(n.id)); if (inp) inp.value = r.cwd; save(); }
     });
@@ -557,7 +605,7 @@
 
   /* ───────── Quick-add palette ───────── */
   let PAL = null;
-  const BUILTINS = [['value', 'Value', 'a number, text, list or any Python expression'], ['code', 'Code', 'your own Python snippet · plots are captured'], ['viewer', 'Viewer', 'big preview of a result: plot, table, text'], ['terminal', 'Terminal', 'a real shell on the canvas'], ['note', 'Note', 'a sticky note']];
+  const BUILTINS = [['value', 'Value', 'a number, text, list or any Python expression'], ['code', 'Code · Python', 'your own Python snippet · plots are captured'], ['code:javascript', 'Code · JavaScript', 'runs with Node.js'], ['code:typescript', 'Code · TypeScript', 'runs with Node.js'], ['code:rust', 'Code · Rust', 'compiled with rustc'], ['code:cpp', 'Code · C++', 'compiled with g++'], ['code:c', 'Code · C', 'compiled with gcc'], ['code:powershell', 'Code · PowerShell', 'a PowerShell script'], ['code:bash', 'Code · Bash', 'a bash script'], ['code:go', 'Code · Go', 'local Go or a container'], ['code:r', 'Code · R', 'local R or a container'], ['code:shell', 'Container shell', 'any image, e.g. alpine, ubuntu'], ['viewer', 'Viewer', 'big preview of a result: plot, table, text'], ['terminal', 'Terminal', 'a real shell on the canvas'], ['note', 'Note', 'a sticky note']];
   async function openPalette(cx, cy, wire) {
     const p = toWorld(cx, cy); PAL = { x: p.x, y: p.y, wire, idx: 0, items: [] };
     const box = $('#palette'); box.hidden = false;
@@ -568,7 +616,7 @@
   async function palList() {
     if (!PAL) return;
     const q = $('#pal-q').value.trim().toLowerCase(), items = [];
-    BUILTINS.forEach(([k, name, desc]) => { if (!q || name.toLowerCase().includes(q)) items.push({ kind: k, name, desc }); });
+    BUILTINS.forEach(([k, name, desc]) => { if (!q || name.toLowerCase().includes(q) || desc.toLowerCase().includes(q)) { const [kind, lang] = k.split(':'); items.push({ kind, lang, name, desc }); } });
     if (RC.ok) { const idx = await ensureIndex(); idx.forEach(f => f.funcs.forEach(fn => { if (!q || fn.toLowerCase().includes(q)) items.push({ kind: 'func', name: fn, file: f.path, desc: base(f.path) }); })); }
     PAL.items = items.slice(0, 60); PAL.idx = 0; palRender();
   }
@@ -577,7 +625,7 @@
   }
   async function palPick(i) {
     const it = PAL && PAL.items[i]; if (!it) return; const { x, y, wire } = PAL; closePalette();
-    const n = it.kind === 'func' ? await addFuncNode(it.file, it.name, x, y - 20) : addNode(it.kind, x, y - 20, {}, it.kind === 'terminal' ? 'terminal' : null);
+    const n = it.kind === 'func' ? await addFuncNode(it.file, it.name, x, y - 20) : addNode(it.kind, x, y - 20, it.lang ? { lang: it.lang } : {}, it.lang ? LANGS[it.lang].label.replace(' (container)', '').toLowerCase() : it.kind === 'terminal' ? 'terminal' : null);
     if (!n || !wire) return;
     if (wire.dir === 'out' && inPorts(n).length) connectEdge(wire.from, n.id, inPorts(n)[0]);
     if (wire.dir === 'in' && hasOut(n)) connectEdge(n.id, wire.to, wire.port);
@@ -667,6 +715,8 @@
       else if (n.kind === 'func') {
         const args = (n.data.params || []).map(p => { const r = ref(p.name), t = String((n.data.values || {})[p.name] || '').trim(); return r ? `${p.name}=${r}` : t ? `${p.name}=${t}` : null; }).filter(Boolean);
         L.push(`${v} = ${mods[n.data.file]}.${n.data.func}(${args.join(', ')})`);
+      } else if (n.kind === 'code' && (langOf(n) !== 'python' || n.data.container || n.data.file)) {
+        L.push(`# (${(LANGS[langOf(n)] || {}).label || langOf(n)} node — run it in Flowbench; not converted to Python)`, `${v} = None`);
       } else if (n.kind === 'code') {
         const params = inPorts(n), fn = '_' + v.replace(/^n_/, 'code_');
         L.push(`def ${fn}(${params.join(', ')}):`);

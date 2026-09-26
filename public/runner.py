@@ -32,7 +32,7 @@ import webbrowser
 from collections import defaultdict
 from pathlib import Path
 
-VERSION = "1.0"
+VERSION = "1.1"
 APP_URL = "https://flowbench.zichaoleng55.workers.dev/"
 IS_WIN = os.name == "nt"
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "env", ".mypy_cache", ".pytest_cache", ".idea", ".vscode", "site-packages", ".ipynb_checkpoints", "dist", "build", ".tox", ".wrangler"}
@@ -140,11 +140,36 @@ def preview(v):
         p["text"] = "<preview failed: %s>" % e
     return p
 
+def jsonable(v, d=0):
+    """Convert a Python result into plain JSON so other languages can read it."""
+    if d > 60: return repr(v)
+    if v is None or isinstance(v, (bool, int, str)): return v
+    if isinstance(v, float): return v if v == v and v not in (float("inf"), float("-inf")) else None
+    if np is not None:
+        if isinstance(v, np.ndarray): return jsonable(v.tolist(), d + 1)
+        if isinstance(v, np.generic): return jsonable(v.item(), d + 1)
+    mod = type(v).__module__
+    if mod.startswith("pandas"):
+        if hasattr(v, "columns"): return jsonable(v.to_dict(orient="records"), d + 1)
+        if hasattr(v, "tolist"): return jsonable(v.tolist(), d + 1)
+    if isinstance(v, dict): return {str(k): jsonable(x, d + 1) for k, x in v.items()}
+    if isinstance(v, (list, tuple, set, frozenset)): return [jsonable(x, d + 1) for x in v]
+    if isinstance(v, (bytes, bytearray)): return base64.b64encode(bytes(v)).decode()
+    if hasattr(v, "isoformat"): return v.isoformat()
+    return repr(v)
+
 for line in sys.stdin:
     try: msg = json.loads(line)
     except Exception: continue
     if msg.get("cmd") == "forget":
         for k in msg.get("nids", []): RESULTS.pop(k, None)
+        continue
+    if msg.get("cmd") == "set":  # a value produced by another language
+        RESULTS[msg["nid"]] = msg.get("value"); FIGS[msg["nid"]] = msg.get("images", [])
+        continue
+    if msg.get("cmd") == "export":  # hand a Python value to another language
+        try: send({"ev": "export", "nid": msg["nid"], "ok": True, "value": jsonable(RESULTS.get(msg["nid"]))})
+        except Exception as e: send({"ev": "export", "nid": msg["nid"], "ok": False, "error": "%s: %s" % (type(e).__name__, e)})
         continue
     nid, kind = msg["nid"], msg["kind"]
     old = sys.stdout, sys.stderr
@@ -207,8 +232,8 @@ class Kernel:
                 ev = json.loads(line)
             except Exception:
                 continue
-            if ev.get("ev") == "done":
-                fut = self.pending.pop(ev["nid"], None)
+            if ev.get("ev") in ("done", "export"):
+                fut = self.pending.pop(("x:" if ev["ev"] == "export" else "") + ev["nid"], None)
                 if fut and not fut.done():
                     fut.set_result(ev)
             else:
@@ -226,9 +251,22 @@ class Kernel:
             self.on_event({"ev": "stream", "nid": None, "name": "stderr", "text": line.decode("utf-8", "replace")})
 
     async def run(self, payload):
+        return await self._call(payload["nid"], payload)
+
+    async def export(self, nid):
+        """Get a Python result as plain JSON (for other languages)."""
+        return await self._call("x:" + nid, {"cmd": "export", "nid": nid})
+
+    async def put(self, nid, value, images=None):
+        """Store a value produced by another language so Python nodes can use it."""
+        await self.ensure()
+        self.proc.stdin.write((json.dumps({"cmd": "set", "nid": nid, "value": value, "images": images or []}) + "\n").encode("utf-8"))
+        await self.proc.stdin.drain()
+
+    async def _call(self, key, payload):
         await self.ensure()
         fut = asyncio.get_running_loop().create_future()
-        self.pending[payload["nid"]] = fut
+        self.pending[key] = fut
         self.proc.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
         await self.proc.stdin.drain()
         return await fut
@@ -242,15 +280,139 @@ class Kernel:
         self.proc = None
 
 
+# ─────────────────────────── other languages & containers ───────────────────────────
+# tier "vars": inputs become variables and `result` is passed on (a small wrapper is added).
+# tier "prog": a normal program; inputs are in the JSON file $FLOW_IN, whatever it prints is the result.
+EXE = ".exe" if IS_WIN else ""
+LANGS = {
+    "javascript": {"ext": ".cjs", "tier": "vars", "tool": "node", "run": ["node", "{src}"], "image": "node:22-alpine", "crun": "node {src}"},
+    "typescript": {"ext": ".cts", "tier": "vars", "tool": "node", "run": ["node", "{src}"], "image": "node:24-alpine", "crun": "node {src}"},
+    "python": {"ext": ".py", "tier": "vars", "tool": None, "run": None, "image": "python:3.12-slim", "crun": "python {src}"},
+    "powershell": {"ext": ".ps1", "tier": "prog", "tool": "powershell", "run": ["{tool}", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "{src}"],
+                   "image": "mcr.microsoft.com/powershell", "crun": "pwsh -NoProfile -File {src}"},
+    "bash": {"ext": ".sh", "tier": "prog", "tool": "bash", "run": ["{tool}", "{src}"], "image": "bash:5", "crun": "bash {src}"},
+    "rust": {"ext": ".rs", "tier": "prog", "tool": "rustc", "build": ["rustc", "-O", "{src}", "-o", "{bin}"], "run": ["{bin}"],
+             "image": "rust:1-slim", "crun": "rustc -O {src} -o /tmp/prog && /tmp/prog"},
+    "c": {"ext": ".c", "tier": "prog", "tool": "gcc", "build": ["gcc", "-O2", "{src}", "-o", "{bin}", "-lm"], "run": ["{bin}"],
+          "image": "gcc:14", "crun": "gcc -O2 {src} -o /tmp/prog -lm && /tmp/prog"},
+    "cpp": {"ext": ".cpp", "tier": "prog", "tool": "g++", "build": ["g++", "-O2", "-std=c++17", "{src}", "-o", "{bin}"], "run": ["{bin}"],
+            "image": "gcc:14", "crun": "g++ -O2 -std=c++17 {src} -o /tmp/prog && /tmp/prog"},
+    "go": {"ext": ".go", "tier": "prog", "tool": "go", "run": ["go", "run", "{src}"], "image": "golang:1.23-alpine", "crun": "go run {src}"},
+    "r": {"ext": ".R", "tier": "prog", "tool": "Rscript", "run": ["Rscript", "{src}"], "image": "r-base", "crun": "Rscript {src}"},
+    "julia": {"ext": ".jl", "tier": "prog", "tool": "julia", "run": ["julia", "{src}"], "image": "julia:1", "crun": "julia {src}"},
+    "java": {"ext": ".java", "tier": "prog", "tool": "java", "run": ["java", "{src}"], "image": "eclipse-temurin:21", "crun": "java {src}", "name": "Main.java"},
+    "shell": {"ext": ".sh", "tier": "prog", "tool": None, "run": None, "image": "alpine:3", "crun": "sh {src}"},
+}
+EXT_LANG = {".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".ts": "typescript", ".ps1": "powershell", ".sh": "bash",
+            ".rs": "rust", ".c": "c", ".cpp": "cpp", ".cc": "cpp", ".go": "go", ".r": "r", ".jl": "julia", ".java": "java"}
+
+
+def find_tool(name):
+    if not name:
+        return None
+    if name == "bash" and IS_WIN:  # prefer Git Bash; C:\Windows\System32\bash.exe is WSL
+        for p in (r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files (x86)\Git\bin\bash.exe"):
+            if os.path.exists(p):
+                return p
+        w = shutil.which("bash")
+        return w if w and "system32" not in w.lower() else None
+    if name == "powershell":
+        return shutil.which("pwsh") or shutil.which("powershell")
+    return shutil.which(name)
+
+
+ENGINE = {"name": None, "path": None, "ok": False, "detail": "not checked yet"}
+
+
+async def detect_engine():
+    """Find Podman (preferred) or Docker, and whether it can actually run containers."""
+    forced = os.environ.get("FLOWBENCH_ENGINE")
+    for name in ([forced] if forced else ["podman", "docker"]):
+        path = shutil.which(name) or (name if forced and os.path.exists(name) else None)
+        if not path:
+            continue
+        ENGINE.update(name=os.path.basename(name).split(".")[0], path=path)
+        try:
+            p = await asyncio.create_subprocess_exec(path, "info", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            out, err = await asyncio.wait_for(p.communicate(), 25)
+            ENGINE["ok"] = p.returncode == 0
+            ENGINE["detail"] = "ready" if ENGINE["ok"] else (err.decode("utf-8", "replace").strip().splitlines() or ["not running"])[-1][:200]
+        except Exception as e:
+            ENGINE["ok"], ENGINE["detail"] = False, "%s: %s" % (type(e).__name__, e)
+        return ENGINE
+    ENGINE.update(name=None, path=None, ok=False, detail="Podman / Docker not installed")
+    return ENGINE
+
+
+def wrap_vars(lang, code, names):
+    """Wrap a tier-'vars' snippet so inputs become variables and `result` is written out."""
+    ok = [n for n in names if n.isidentifier()]
+    if lang in ("javascript", "typescript"):
+        head = "const __fs = require('fs');\nconst __in = JSON.parse(__fs.readFileSync(process.env.FLOW_IN, 'utf8'));\n"
+        head += "".join("let %s = __in[%s];\n" % (n, json.dumps(n)) for n in ok)
+        head += "let result%s = undefined;\n" % (": any" if lang == "typescript" else "")
+        tail = "\n;__fs.writeFileSync(process.env.FLOW_RESULT, JSON.stringify(result === undefined ? null : result, (k, v) => typeof v === 'bigint' ? v.toString() : v));\n"
+        return head + "// ── your code ──\n" + code + tail
+    if lang == "python":
+        head = "import json, os\n__in = json.load(open(os.environ['FLOW_IN'], encoding='utf-8'))\n"
+        head += "".join("%s = __in[%r]\n" % (n, n) for n in ok) + "result = None\n"
+        tail = "\njson.dump(result, open(os.environ['FLOW_RESULT'], 'w', encoding='utf-8'), default=lambda o: o.tolist() if hasattr(o, 'tolist') else repr(o))\n"
+        return head + "# ── your code ──\n" + code + tail
+    return code
+
+
+def json_preview(v, text_fallback=None):
+    """Preview for values coming back from other languages (plain JSON)."""
+    p = {"type": "json " + type(v).__name__ if text_fallback is None else "text"}
+    if text_fallback is not None:
+        p["text"] = text_fallback[:20000]
+        return p
+    if isinstance(v, list):
+        p["shape"] = [len(v)]
+        nums = [x for x in v[:200000] if isinstance(x, (int, float)) and not isinstance(x, bool)]
+        if len(v) > 1 and len(nums) == len(v):
+            step = max(1, len(v) // 1500)
+            p["plot"] = [float(x) for x in v[::step]]
+        elif v and all(isinstance(r, dict) for r in v[:200]):
+            cols = []
+            for r in v[:200]:
+                for k in r:
+                    if k not in cols:
+                        cols.append(k)
+            esc = lambda s: str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            rows = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % esc(r.get(c, "")) for c in cols[:30]) for r in v[:60])
+            p["html"] = "<table><thead><tr>%s</tr></thead><tbody>%s</tbody></table>" % ("".join("<th>%s</th>" % esc(c) for c in cols[:30]), rows)
+    p["text"] = json.dumps(v, indent=1, ensure_ascii=False)[:20000] if not isinstance(v, str) else v[:20000]
+    return p
+
+
+def collect_media(folder):
+    out = []
+    mimes = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp"}
+    import base64
+    for f in sorted(Path(folder).glob("*"))[:12]:
+        m = mimes.get(f.suffix.lower())
+        if m and f.stat().st_size < 8 * 1024 * 1024:
+            out.append("data:%s;base64,%s" % (m, base64.b64encode(f.read_bytes()).decode()))
+    return out
+
+
 # ─────────────────────────── terminals ───────────────────────────
-def shell_argv(shell, python):
+def shell_argv(shell, python, image=None, root=None):
+    if shell == "container":
+        if not ENGINE.get("path"):
+            raise RuntimeError("Podman / Docker is not installed (run: flowbench podman)")
+        return [ENGINE["path"], "run", "-it", "--rm", "-v", "%s:/code" % root, "-w", "/code", image or "python:3.12-slim",
+                "sh", "-c", "command -v bash >/dev/null && exec bash || exec sh"]
     if shell == "python":
         return [python, "-i", "-u"]
     if IS_WIN:
         if shell == "cmd":
             return ["cmd.exe"]
         if shell == "bash":
-            b = shutil.which("bash") or r"C:\Program Files\Git\bin\bash.exe"
+            b = find_tool("bash")
+            if not b:
+                raise RuntimeError("bash was not found (install Git for Windows, or use a container terminal)")
             return [b, "--login", "-i"]
         return [shutil.which("pwsh") or "powershell.exe", "-NoLogo"]
     return [os.environ.get("SHELL", "/bin/bash"), "-i"] if shell != "cmd" else ["/bin/sh", "-i"]
@@ -396,6 +558,8 @@ class Session:
         self.kernel = Kernel(self.python, str(cfg.roots[0]), self._kernel_event)
         self.terms, self.sig, self.running, self.run_task = {}, {}, False, None
         self.index_cache = {}
+        self.values, self.media, self.where = {}, {}, {}   # results of non-Python nodes; where each result lives
+        self.procs, self.containers = set(), set()
 
     def send(self, obj):
         asyncio.ensure_future(self._send(obj))
@@ -417,6 +581,12 @@ class Session:
                 return rp
         raise PermissionError("Outside the allowed folders: " + str(rp))
 
+    def langs(self):
+        return {k: bool(find_tool(v["tool"])) for k, v in LANGS.items()}
+
+    def engine_info(self):
+        return {"name": ENGINE.get("name"), "ok": ENGINE.get("ok"), "detail": ENGINE.get("detail")}
+
     async def handle(self, msg):
         t, rid = msg.get("type"), msg.get("id")
         reply = lambda **kw: self.send(dict(re=rid, **kw))
@@ -424,7 +594,8 @@ class Session:
             if t == "hello" and secrets.compare_digest(str(msg.get("token", "")), self.cfg.token):
                 self.authed = True
                 reply(ok=True, version=VERSION, python=self.python, pyversion=self.cfg.pyversion, platform=sys.platform,
-                      roots=[str(r) for r in self.cfg.roots], fullterm=bool(PtyProcess) or not IS_WIN)
+                      roots=[str(r) for r in self.cfg.roots], fullterm=bool(PtyProcess) or not IS_WIN,
+                      langs=self.langs(), engine=self.engine_info())
             else:
                 await self._send({"re": rid, "ok": False, "error": "Wrong token"})
                 await self.ws.close(1008, "unauthorized")
@@ -436,8 +607,9 @@ class Session:
                 for e in sorted(d.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower())):
                     if e.name.startswith(".") or e.name in SKIP_DIRS:
                         continue
-                    if e.is_dir() or e.suffix == ".py":
-                        items.append({"name": e.name, "path": str(e), "dir": e.is_dir()})
+                    lang = EXT_LANG.get(e.suffix.lower())
+                    if e.is_dir() or e.suffix == ".py" or lang:
+                        items.append({"name": e.name, "path": str(e), "dir": e.is_dir(), "lang": None if e.is_dir() or e.suffix == ".py" else lang})
                 reply(ok=True, path=str(d), items=items)
             elif t == "scan":
                 p = self.safe(msg["path"])
@@ -447,22 +619,25 @@ class Session:
                 reply(ok=True, path=str(p), text=p.read_text(encoding="utf-8", errors="replace")[:400000])
             elif t == "index":
                 reply(ok=True, files=await asyncio.to_thread(self.build_index))
+            elif t == "engine":
+                await detect_engine()
+                reply(ok=True, engine=self.engine_info(), langs=self.langs())
             elif t == "run":
                 if self.running:
                     return reply(ok=False, error="A run is already in progress")
                 self.run_task = asyncio.create_task(self.run_graph(msg, rid))
             elif t == "stop":
-                self.kernel.kill(); self.sig.clear()
+                self.stop_all()
                 reply(ok=True)
             elif t == "reset":
-                self.kernel.kill(); self.sig.clear()
+                self.stop_all()
                 if msg.get("python"):
                     self.python = self.kernel.python = msg["python"]
                 reply(ok=True, python=self.python)
             elif t == "term-open":
                 tid = msg["tid"]
                 cwd = str(self.safe(msg.get("cwd") or self.cfg.roots[0]))
-                argv = shell_argv(msg.get("shell", "default"), self.python)
+                argv = shell_argv(msg.get("shell", "default"), self.python, msg.get("image"), cwd)
                 self.terms[tid] = Term(self.loop, self.send, tid, argv, cwd, int(msg.get("cols", 80)), int(msg.get("rows", 24)))
                 reply(ok=True, mode=self.terms[tid].mode, cwd=cwd)
             elif t == "term-input":
@@ -482,12 +657,27 @@ class Session:
         except Exception as e:
             reply(ok=False, error="%s: %s" % (type(e).__name__, e))
 
+    def stop_all(self):
+        self.kernel.kill()
+        self.sig.clear(); self.where.clear(); self.values.clear(); self.media.clear()
+        for p in list(self.procs):
+            try:
+                p.kill()
+            except Exception:
+                pass
+        self.procs.clear()
+        if ENGINE.get("path"):
+            for c in list(self.containers):
+                asyncio.ensure_future(asyncio.create_subprocess_exec(ENGINE["path"], "rm", "-f", c,
+                                                                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL))
+        self.containers.clear()
+
     def build_index(self):
         files, count = [], 0
         for root in self.cfg.roots:
             for dirpath, dirnames, filenames in os.walk(root):
                 dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS]
-                if Path(dirpath).relative_to(root).parts.__len__() > 6:
+                if len(Path(dirpath).relative_to(root).parts) > 6:
                     dirnames[:] = []
                 for fn in filenames:
                     if not fn.endswith(".py"):
@@ -507,6 +697,11 @@ class Session:
                     except Exception:
                         continue
         return files
+
+    @staticmethod
+    def is_ext(n):
+        d = n.get("data", {})
+        return n.get("kind") == "code" and ((d.get("lang") or "python") != "python" or bool(d.get("container")))
 
     async def run_graph(self, msg, rid):
         self.running = True
@@ -538,57 +733,246 @@ class Session:
             if len(order) != len(need):
                 self.send({"type": "run-done", "re": rid, "ok": False, "error": "The workflow has a loop (cycle). Remove one of the wires."})
                 return
-            failed, force = set(), bool(msg.get("force"))
-            for nid in order:
-                n, d = nodes[nid], nodes[nid].get("data", {})
-                if any(s in failed for s in ins[nid].values()):
-                    failed.add(nid); self.send({"type": "node", "nid": nid, "status": "skipped"}); continue
-                payload = {"nid": nid, "kind": n["kind"], "args": {}}
-                extra = ""
-                if n["kind"] == "func":
-                    fpath = self.safe(d["file"])
-                    payload.update(file=str(fpath), func=d["func"]); extra = str(fpath.stat().st_mtime)
-                    for p in d.get("params", []):
-                        name = p["name"]
-                        if name in ins[nid]:
-                            payload["args"][name] = {"ref": ins[nid][name]}
-                        elif str(d.get("values", {}).get(name, "")).strip():
-                            payload["args"][name] = {"expr": d["values"][name]}
-                elif n["kind"] == "code":
-                    payload["code"] = d.get("code", "")
-                    for name in [s.strip() for s in d.get("inputs", "").split(",") if s.strip()]:
-                        payload["args"][name] = {"ref": ins[nid][name]} if name in ins[nid] else {"expr": d.get("values", {}).get(name, "") or "None"}
-                elif n["kind"] == "value":
-                    payload["expr"] = d.get("expr", "")
-                elif "data" in ins[nid]:
-                    payload["args"]["data"] = {"ref": ins[nid]["data"]}
-                sig = hashlib.sha1(json.dumps([payload, extra, [self.sig.get(s) for _, s in sorted(ins[nid].items())]], sort_keys=True).encode()).hexdigest()
-                if not force and self.sig.get(nid) == sig:
-                    self.send({"type": "node", "nid": nid, "status": "cached"}); continue
-                self.send({"type": "node", "nid": nid, "status": "running"})
-                try:
-                    res = await self.kernel.run(payload)
-                except Exception as e:
-                    res = {"ok": False, "error": str(e), "ms": 0}
-                if res.get("ok"):
-                    self.sig[nid] = sig
-                    self.send({"type": "node", "nid": nid, "status": "ok", "ms": res.get("ms"), "preview": res.get("preview")})
-                else:
-                    self.sig.pop(nid, None); failed.add(nid)
-                    self.send({"type": "node", "nid": nid, "status": "error", "ms": res.get("ms"), "error": res.get("error")})
-                    if "kernel stopped" in str(res.get("error", "")):
-                        self.sig.clear(); break
+            force = bool(msg.get("force"))
+            ok, failed, running = set(), set(), {}
+            remaining = list(order)
+            klock, sem = asyncio.Lock(), asyncio.Semaphore(4)
+            # independent branches run in parallel; Python nodes share one kernel, so they take turns
+            while remaining or running:
+                for nid in list(remaining):
+                    deps = list(ins[nid].values())
+                    if any(d in failed for d in deps):
+                        remaining.remove(nid); failed.add(nid); self.send({"type": "node", "nid": nid, "status": "skipped"})
+                    elif all(d in ok for d in deps):
+                        remaining.remove(nid)
+                        running[nid] = asyncio.create_task(self.run_node(nid, nodes[nid], ins[nid], force, klock, sem))
+                if not running:
+                    break
+                done, _ = await asyncio.wait(list(running.values()), return_when=asyncio.FIRST_COMPLETED)
+                for nid, task in list(running.items()):
+                    if task in done:
+                        running.pop(nid)
+                        try:
+                            good = task.result()
+                        except Exception as e:
+                            good = False
+                            self.send({"type": "node", "nid": nid, "status": "error", "error": "%s: %s" % (type(e).__name__, e)})
+                        (ok if good else failed).add(nid)
             self.send({"type": "run-done", "re": rid, "ok": not failed, "failed": len(failed)})
         except Exception as e:
             self.send({"type": "run-done", "re": rid, "ok": False, "error": "%s: %s" % (type(e).__name__, e)})
         finally:
             self.running = False
 
+    async def run_node(self, nid, n, ins_n, force, klock, sem):
+        d = n.get("data", {})
+        kind = n["kind"]
+        ext = self.is_ext(n)
+        payload, extra = {"nid": nid, "kind": kind, "args": {}}, ""
+        if ext:
+            code = d.get("code", "")
+            if d.get("file"):
+                fp = self.safe(d["file"])
+                code = fp.read_text(encoding="utf-8", errors="replace")
+                extra = str(fp.stat().st_mtime)
+            payload.update(kind="ext", lang=d.get("lang") or "python", code=code, fromfile=bool(d.get("file")), inputs=d.get("inputs", ""), values=d.get("values", {}),
+                           container=bool(d.get("container")), image=d.get("image") or "")
+        elif kind == "func":
+            fpath = self.safe(d["file"])
+            payload.update(file=str(fpath), func=d["func"])
+            extra = str(fpath.stat().st_mtime)
+            for p in d.get("params", []):
+                name = p["name"]
+                if name in ins_n:
+                    payload["args"][name] = {"ref": ins_n[name]}
+                elif str(d.get("values", {}).get(name, "")).strip():
+                    payload["args"][name] = {"expr": d["values"][name]}
+        elif kind == "code":
+            payload["code"] = d.get("code", "")
+            for name in [s.strip() for s in d.get("inputs", "").split(",") if s.strip()]:
+                payload["args"][name] = {"ref": ins_n[name]} if name in ins_n else {"expr": d.get("values", {}).get(name, "") or "None"}
+        elif kind == "value":
+            payload["expr"] = d.get("expr", "")
+        elif "data" in ins_n:
+            payload["args"]["data"] = {"ref": ins_n["data"]}
+        sig = hashlib.sha1(json.dumps([payload, extra, [self.sig.get(s) for _, s in sorted(ins_n.items())]], sort_keys=True).encode()).hexdigest()
+        if not force and self.sig.get(nid) == sig and nid in self.where:
+            self.send({"type": "node", "nid": nid, "status": "cached"})
+            return True
+        self.send({"type": "node", "nid": nid, "status": "running"})
+        t0 = time.perf_counter()
+        # a viewer showing a non-Python result needs no kernel
+        if kind == "viewer" and self.where.get(ins_n.get("data")) == "ext":
+            src = ins_n["data"]
+            v, media = self.values.get(src), self.media.get(src, [])
+            self.values[nid], self.media[nid], self.where[nid] = v, media, "ext"
+            pv = json_preview(None, v) if isinstance(v, str) else json_preview(v)
+            if media:
+                pv["images"] = media
+            self.sig[nid] = sig
+            self.send({"type": "node", "nid": nid, "status": "ok", "ms": 0.1, "preview": pv})
+            return True
+        if not ext:
+            async with klock:
+                for src in ins_n.values():
+                    if self.where.get(src) == "ext":
+                        await self.kernel.put(src, self.values.get(src), self.media.get(src))
+                try:
+                    res = await self.kernel.run(payload)
+                except Exception as e:
+                    res = {"ok": False, "error": str(e), "ms": 0}
+            if res.get("ok"):
+                self.sig[nid] = sig
+                self.where[nid] = "kernel"
+                self.send({"type": "node", "nid": nid, "status": "ok", "ms": res.get("ms"), "preview": res.get("preview")})
+                return True
+            self.sig.pop(nid, None)
+            self.where.pop(nid, None)
+            if "kernel stopped" in str(res.get("error", "")):
+                self.sig.clear()
+                self.where = {k: v for k, v in self.where.items() if v == "ext"}
+            self.send({"type": "node", "nid": nid, "status": "error", "ms": res.get("ms"), "error": res.get("error")})
+            return False
+        # another language (or a container)
+        async with sem:
+            inputs = {}
+            names = [s.strip() for s in d.get("inputs", "").split(",") if s.strip()]
+            for name in names:
+                if name in ins_n:
+                    src = ins_n[name]
+                    if self.where.get(src) == "ext":
+                        inputs[name] = self.values.get(src)
+                    else:
+                        async with klock:
+                            r = await self.kernel.export(src)
+                        if not r.get("ok"):
+                            raise RuntimeError("Could not pass '%s' on: %s" % (name, r.get("error")))
+                        inputs[name] = r["value"]
+                else:
+                    raw = str(d.get("values", {}).get(name, "")).strip()
+                    try:
+                        inputs[name] = json.loads(raw) if raw else None
+                    except Exception:
+                        inputs[name] = raw
+            res = await self.run_ext(nid, payload, inputs)
+        res["ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        if not res["ok"]:
+            self.sig.pop(nid, None)
+            self.where.pop(nid, None)
+            self.send({"type": "node", "nid": nid, "status": "error", "ms": res["ms"], "error": res["error"]})
+            return False
+        self.values[nid], self.media[nid], self.where[nid] = res["value"], res["media"], "ext"
+        pv = json_preview(None, res["value"]) if res.get("is_text") else json_preview(res["value"])
+        if res["media"]:
+            pv["images"] = res["media"]
+        self.sig[nid] = sig
+        self.send({"type": "node", "nid": nid, "status": "ok", "ms": res["ms"], "preview": pv})
+        return True
+
+    async def run_ext(self, nid, p, inputs):
+        lang = p["lang"] if p["lang"] in LANGS else "python"
+        L = LANGS[lang]
+        container = p["container"] or lang == "shell"
+        work = Path.home() / ".flowbench" / "work" / nid
+        shutil.rmtree(work, ignore_errors=True)
+        (work / "out").mkdir(parents=True, exist_ok=True)
+        src_name = L.get("name") or ("main" + L["ext"])
+        tier = "prog" if p.get("fromfile") else L["tier"]  # a script file: whatever it prints is the result
+        code = wrap_vars(lang, p["code"], list(inputs)) if tier == "vars" else p["code"]
+        (work / src_name).write_text(code, encoding="utf-8")
+        (work / "inputs.json").write_text(json.dumps(inputs, ensure_ascii=False), encoding="utf-8")
+        steps = []
+        binp = None
+        if container:
+            if not ENGINE.get("ok"):
+                await detect_engine()
+            if not ENGINE.get("ok"):
+                return {"ok": False, "error": "Containers aren't ready (%s).\nSet them up once with:  flowbench podman" % ENGINE.get("detail")}
+            cname = "flowbench-%s-%s" % (nid, secrets.token_hex(3))
+            self.containers.add(cname)
+            argv = [ENGINE["path"], "run", "--rm", "-i", "--name", cname, "-v", "%s:/work" % work, "-v", "%s:/code:ro" % self.cfg.roots[0], "-w", "/work",
+                    "-e", "FLOW_IN=/work/inputs.json", "-e", "FLOW_OUT=/work/out", "-e", "FLOW_RESULT=/work/result.json",
+                    p["image"] or L["image"], "sh", "-c", L["crun"].format(src="/work/" + src_name)]
+            steps.append(("run", argv))
+        else:
+            tool = self.python if lang == "python" else find_tool(L["tool"])
+            if not tool:
+                return {"ok": False, "error": "%s isn't installed on this computer.\nTick CONTAINER on this node to run it with Podman instead." % lang}
+            build_dir = Path.home() / ".flowbench" / "build"
+            build_dir.mkdir(parents=True, exist_ok=True)
+            binp = build_dir / (hashlib.sha1((lang + "\0" + code).encode()).hexdigest()[:16] + EXE)
+            fmt = lambda a: [x.format(src=str(work / src_name), bin=str(binp), tool=tool) for x in a]
+            if L.get("build") and not binp.exists():
+                b = fmt(L["build"])
+                b[0] = find_tool(b[0]) or b[0]
+                steps.append(("build", b))
+            run = fmt(L["run"] or ["{tool}", "{src}"])
+            if run[0] == L["tool"]:
+                run[0] = tool
+            steps.append(("run", run))
+        env = dict(os.environ, FLOW_IN=str(work / "inputs.json"), FLOW_OUT=str(work / "out"), FLOW_RESULT=str(work / "result.json"),
+                   PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+        stdout_text = ""
+        for step, argv in steps:
+            try:
+                rc, out, err = await self.run_proc(nid, argv, work, env, stream_stdout=(step == "build" or tier == "vars"))
+            except FileNotFoundError as e:
+                return {"ok": False, "error": "Could not start %s: %s" % (argv[0], e)}
+            except OSError as e:
+                if getattr(e, "winerror", None) in (4551, 1260, 225):
+                    return {"ok": False, "error": ("Windows blocked the compiled program (Smart App Control / application control policy "
+                                                   "doesn't allow new unsigned .exe files).\nTick CONTAINER on this node to build and run it "
+                                                   "in Podman instead, or allow the file in Windows Security.")}
+                return {"ok": False, "error": "Could not start %s: %s" % (argv[0], e)}
+            if rc != 0:
+                if step == "build" and binp is not None:
+                    try:
+                        binp.unlink()
+                    except Exception:
+                        pass
+                tail = (err or out)[-4000:]
+                return {"ok": False, "error": "%s failed (exit code %s)\n%s" % ("Compiling" if step == "build" else "The program", rc, tail)}
+            if step == "run":
+                stdout_text = out
+        media = collect_media(work / "out")
+        if tier == "vars":
+            rf = work / "result.json"
+            value = json.loads(rf.read_text(encoding="utf-8")) if rf.exists() else None
+            return {"ok": True, "value": value, "media": media}
+        s = stdout_text.strip()
+        if not s:
+            return {"ok": True, "value": None, "media": media}
+        try:
+            return {"ok": True, "value": json.loads(s), "media": media}
+        except Exception:
+            return {"ok": True, "value": stdout_text, "media": media, "is_text": True}
+
+    async def run_proc(self, nid, argv, cwd, env, stream_stdout):
+        proc = await asyncio.create_subprocess_exec(*argv, cwd=str(cwd), env=env, stdin=asyncio.subprocess.DEVNULL,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        self.procs.add(proc)
+        buf = {"stdout": [], "stderr": []}
+
+        async def pump(stream, name):
+            dec = codecs.getincrementaldecoder("utf-8")("replace")
+            while True:
+                chunk = await stream.read(8192)
+                if not chunk:
+                    break
+                text = dec.decode(chunk)
+                buf[name].append(text)
+                if name == "stderr" or stream_stdout:
+                    self.send({"type": "stream", "nid": nid, "name": name, "text": text})
+        await asyncio.gather(pump(proc.stdout, "stdout"), pump(proc.stderr, "stderr"))
+        rc = await proc.wait()
+        self.procs.discard(proc)
+        return rc, "".join(buf["stdout"]), "".join(buf["stderr"])
+
     def cleanup(self):
         for term in self.terms.values():
             term.close()
         self.terms.clear()
-        self.kernel.kill()
+        self.stop_all()
 
 
 # ─────────────────────────── serve the web app locally ───────────────────────────
@@ -800,6 +1184,7 @@ async def main():
             status, ctype, body = http_response(path)
             return status, [("Content-Type", ctype), ("Content-Length", str(len(body)))], body
 
+    asyncio.create_task(detect_engine())
     async with ws_serve(handler, "127.0.0.1", cfg.port, max_size=64 * 1024 * 1024, ping_interval=20, process_request=process_request):
         try:
             sys.stdout.reconfigure(line_buffering=True)

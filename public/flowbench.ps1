@@ -92,6 +92,33 @@ switch ($Cmd.ToLower()) {
     $c = Load-Cfg; $c | Add-Member -NotePropertyName python -NotePropertyValue $exe -Force; Save-Cfg $c
     Write-Host "  Your code will now run with $exe"; Restart-IfRunning
   }
+  'podman' {
+    $pm = Get-Command podman -ErrorAction SilentlyContinue
+    if (-not $pm) {
+      $pf = Join-Path $env:ProgramFiles 'RedHat\Podman\podman.exe'
+      if (Test-Path $pf) { $env:Path += ';' + (Split-Path $pf); $pm = $pf }
+    }
+    if (-not $pm) {
+      Write-Host '  Podman is not installed. It runs containers inside WSL2 and needs a few GB of disk space.'
+      if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { Write-Host '  Install it from https://podman.io/ and run "flowbench podman" again.'; break }
+      $a = Read-Host '  Install Podman now with winget? (y/N)'
+      if ($a -notmatch '^[yY]') { Write-Host '  Skipped. Nothing was changed.'; break }
+      winget install -e --id RedHat.Podman --accept-source-agreements --accept-package-agreements
+      $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+      if (-not (Get-Command podman -ErrorAction SilentlyContinue)) { Write-Host '  Installed. Open a NEW terminal and run "flowbench podman" again to finish.'; break }
+    }
+    $machines = & podman machine list --format '{{.Name}}' 2>$null
+    if (-not $machines) {
+      Write-Host '  Creating the Podman machine (one time, takes a few minutes)...'
+      & podman machine init
+      if ($LASTEXITCODE -ne 0) { Write-Host '  "podman machine init" failed. WSL2 may be missing: run "wsl --install" in an administrator terminal, restart Windows, then run "flowbench podman" again.'; break }
+    }
+    & podman info *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host '  Starting the Podman machine...'; & podman machine start }
+    & podman info *> $null
+    if ($LASTEXITCODE -eq 0) { Write-Host '  Podman is ready: CONTAINER nodes and container terminals work now.' -ForegroundColor Green; Restart-IfRunning }
+    else { Write-Host '  Podman is installed but not running yet. Try:  podman machine start' }
+  }
   'examples' { $was = Is-Running; if ($was) { Stop-Runner }; Start-Runner @('--examples') }
   'update' {
     Update-Runner
@@ -110,6 +137,7 @@ switch ($Cmd.ToLower()) {
   flowbench folders         list your folders
   flowbench python <path>   choose which Python runs your code (e.g. a conda / venv python.exe)
   flowbench examples        add a small demo folder to your first folder
+  flowbench podman          set up Podman so nodes can run in containers (any language)
   flowbench status          is it running? which Python and folders?
   flowbench stop | restart  stop or restart the runner
   flowbench update          get the latest version

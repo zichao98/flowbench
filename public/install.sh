@@ -72,6 +72,16 @@ case "${1:-start}" in
   folders|list|ls) "$PYR" -c "import json;[print('  '+r) for r in json.load(open('$CFG'))['roots']]" ;;
   python) shift; edit python "$1"; restart_if ;;
   examples) stop >/dev/null; start --examples ;;
+  podman)
+    if ! command -v podman >/dev/null 2>&1; then
+      if [ "$(uname)" = Darwin ]; then echo "  Install Podman with:  brew install podman   then run: flowbench podman"; else echo "  Install Podman with your package manager, e.g.  sudo apt install podman   then run: flowbench podman"; fi
+      exit 0
+    fi
+    if [ "$(uname)" = Darwin ]; then
+      podman machine list --format '{{.Name}}' | grep -q . || podman machine init
+      podman info >/dev/null 2>&1 || podman machine start
+    fi
+    if podman info >/dev/null 2>&1; then echo "  Podman is ready: CONTAINER nodes work now."; restart_if; else echo "  Podman isn't running yet (try: podman machine start)."; fi ;;
   stop) stop ;;
   restart) stop; start ;;
   status) if running; then echo "  Running on http://127.0.0.1:$(port)"; else echo "  Not running."; fi ;;
@@ -85,6 +95,7 @@ case "${1:-start}" in
   flowbench folders         list your folders
   flowbench python <path>   choose which Python runs your code (e.g. a conda / venv python)
   flowbench examples        add a small demo folder to your first folder
+  flowbench podman          set up Podman for CONTAINER nodes
   flowbench status | stop | restart | update | token
 
 HELP

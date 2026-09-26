@@ -206,3 +206,21 @@ details.n-fold summary::before { content: "▸ "; } details.n-fold[open] summary
 .dialog .x { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; padding: 0; top: 14px; right: 14px; }
 .dialog .x:hover { background: var(--panel2); color: var(--ink); }
 .dialog .x .ico { width: 16px; height: 16px; }
+
+/* ───── multi-language code nodes ───── */
+.n-check { display: inline-flex; align-items: center; gap: 5px; font: 700 9.5px var(--mono); letter-spacing: .1em; color: var(--ink2); cursor: pointer; padding: 3px 7px; border: 1px solid var(--line); border-radius: 7px; white-space: nowrap; }
+.n-check input { width: 12px; height: 12px; accent-color: var(--red); margin: 0; flex: none; }
+.n-check .ico { width: 13px; height: 13px; }
+.n-check:has(input:checked) { border-color: var(--red); color: var(--ink); }
+.n-hint { margin: -2px 12px 6px; font: 10.5px/1.45 var(--sans); color: var(--mute); }
+.n-hint code { font: 10px var(--code); background: var(--bg); padding: 0 4px; border-radius: 4px; }
+.n-hint.warn { color: var(--ink); background: var(--red-soft); border-radius: 8px; padding: 6px 8px; }
+.n-filebar { display: flex; align-items: center; gap: 7px; margin: 0 10px 6px; padding: 8px 10px; border-radius: 9px; background: var(--bg); border: 1px dashed var(--line); font: 11.5px var(--code); color: var(--ink); }
+.n-filebar .ico { width: 15px; height: 15px; color: var(--k-code); }
+.n-filebar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-btn { border: 1px solid var(--line); background: var(--panel2); color: var(--ink2); font: 700 9px var(--mono); letter-spacing: .08em; padding: 4px 7px; border-radius: 6px; }
+.mini-btn:hover { color: var(--ink); border-color: var(--ink2); }
+.ti.script { cursor: grab; }
+.ti.script .ic { color: var(--k-code); }
+.ti small.tag { margin-left: auto; font: 700 8.5px var(--mono); letter-spacing: .08em; color: var(--mute); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.n-field select { max-width: 150px; }
