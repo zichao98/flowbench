@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Flowbench · Visual Python Workflows</title>
+<meta name="description" content="Flowbench: an infinite canvas where you drag your own Python functions in from local folders, wire them together like n8n, run the workflow, see plots and tables inline, and open many terminals side by side." />
+<meta name="theme-color" content="#0b0b0a" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111'/%3E%3Crect x='5' y='7' width='9' height='7' rx='2' fill='%23eee'/%3E%3Crect x='18' y='18' width='9' height='7' rx='2' fill='%23eee'/%3E%3Cpath d='M14 10.5 C20 10.5 12 21.5 18 21.5' stroke='%23D71921' stroke-width='2' fill='none'/%3E%3C/svg%3E" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+<link rel="stylesheet" href="style.css?v=1" />
+</head>
+<body>
+<header class="bar">
+  <div class="brand"><span class="logo" aria-hidden="true"></span><b class="dotfont">FLOWBENCH</b></div>
+  <button class="pill" id="runner-pill" title="Local runner connection"><span class="led" id="runner-led"></span><span id="runner-label">RUNNER OFFLINE</span></button>
+  <div class="grow"></div>
+  <div class="btn-group">
+    <button class="pill primary" id="run-all" title="Run the whole workflow (Ctrl+Enter)">▶ RUN</button>
+    <button class="pill" id="run-sel" title="Run the selected nodes (Shift+Enter)">▶ SELECTED</button>
+    <button class="pill" id="stop" title="Stop and reset the Python kernel">■ STOP</button>
+  </div>
+  <div class="btn-group">
+    <button class="pill" id="add-btn" title="Add a node (double-click the canvas)">+ NODE</button>
+    <button class="pill" id="term-btn" title="Open a new terminal on the canvas">&gt;_ TERMINAL</button>
+  </div>
+  <div class="btn-group">
+    <button class="pill icon" id="undo" title="Undo (Ctrl+Z)">↶</button>
+    <button class="pill icon" id="redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+    <button class="pill" id="open-flow" title="Open a saved .flow.json">OPEN</button>
+    <button class="pill" id="save-flow" title="Download this workflow (Ctrl+S)">SAVE</button>
+    <button class="pill icon" id="theme-btn" aria-label="Toggle light / dark"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor"/></svg></button>
+  </div>
+  <input type="file" id="file-in" accept=".json,application/json" hidden />
+</header>
+
+<aside class="lib" id="lib">
+  <div class="lib-head"><span class="mono">LIBRARY</span><button class="mini" id="lib-refresh" title="Refresh">⟳</button><button class="mini" id="lib-toggle" title="Hide library">⟨</button></div>
+  <input class="search" id="lib-search" placeholder="Search functions…" autocomplete="off" />
+  <div class="lib-tree" id="lib-tree"></div>
+  <div class="lib-foot mono" id="lib-foot">Drag a function onto the canvas</div>
+</aside>
+<button class="lib-open" id="lib-open" title="Show library">⟩</button>
+
+<main class="stage" id="stage">
+  <div class="world" id="world">
+    <svg class="edges" id="edges"><g id="edge-g"></g><path id="edge-temp" class="edge temp"></path></svg>
+    <div id="nodes"></div>
+  </div>
+  <div class="selbox" id="selbox"></div>
+  <div class="zoom mono"><button id="zoom-out">−</button><span id="zoom-val">100%</span><button id="zoom-in">+</button><button id="zoom-fit" title="Fit everything (F)">FIT</button></div>
+  <canvas class="minimap" id="minimap" width="200" height="130"></canvas>
+  <div class="hint mono" id="hint">Drag background to pan · Ctrl+scroll to zoom · drag from ● to ● to connect · double-click to add</div>
+</main>
+
+<div class="palette" id="palette" hidden>
+  <input id="pal-q" placeholder="Add node… type a function name" autocomplete="off" />
+  <div id="pal-list"></div>
+</div>
+
+<div class="modal" id="connect-modal" hidden>
+  <div class="dialog">
+    <button class="x" data-close>×</button>
+    <h2 class="dotfont">CONNECT THE RUNNER</h2>
+    <p>Flowbench runs your Python on <b>your own computer</b> through a small local program. Do this once:</p>
+    <ol class="steps">
+      <li>Download <a href="runner.py" download>runner.py</a> and put it anywhere (for example your Desktop).</li>
+      <li>Install its two helpers (once):<pre class="cmd">pip install websockets pywinpty</pre><small>pywinpty gives full terminals on Windows. On macOS / Linux just <code>pip install websockets</code>.</small></li>
+      <li>Start it, pointing at the folder with your code:<pre class="cmd">python runner.py --root "C:\Users\zicha\OneDrive\Desktop" --examples</pre><small><code>--examples</code> adds a small demo folder. Your browser opens and connects automatically.</small></li>
+    </ol>
+    <details><summary>Connect manually</summary>
+      <div class="row"><label>Runner address <input id="rc-url" value="ws://127.0.0.1:8765" /></label><label>Token <input id="rc-token" placeholder="printed by runner.py" /></label><button class="pill primary" id="rc-connect">CONNECT</button></div>
+    </details>
+    <p class="fine">The runner only listens on this computer (127.0.0.1), needs the secret token, and only reads the folders you pass with <code>--root</code>. If Chrome asks to allow access to devices on your local network, allow it.</p>
+  </div>
+</div>
+
+<div class="modal" id="src-modal" hidden>
+  <div class="dialog wide"><button class="x" data-close>×</button><h2 class="mono" id="src-title"></h2><pre class="src" id="src-body"></pre></div>
+</div>
+<div class="toast mono" id="toast" role="status"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script src="app.js?v=1"></script>
+</body>
+</html>
