@@ -58,8 +58,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .kids { padding-left: 12px; }
 .lib-empty { padding: 14px 10px; color: var(--ink2); font-size: 13px; line-height: 1.55; }
 .lib-empty .pill { margin-top: 10px; }
-.lib-open { position: fixed; left: 8px; top: 64px; z-index: 19; width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); display: none; }
-.lib.hide + .lib-open { display: block; }
+.lib-open { position: fixed; left: 8px; top: 64px; z-index: 19; width: 30px; height: 30px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel); }
 
 /* stage */
 .stage { position: fixed; top: 52px; left: 280px; right: 0; bottom: 0; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--dot) 1.1px, transparent 1.4px); cursor: default; touch-action: none; transition: left .25s; }
@@ -172,3 +171,38 @@ details.n-fold summary::before { content: "▸ "; } details.n-fold[open] summary
 .src span.hl { background: var(--red-soft); }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; z-index: 60; background: var(--ink); color: var(--bg); font-size: 11px; letter-spacing: .08em; padding: 10px 16px; border-radius: 999px; transition: opacity .25s, transform .25s; pointer-events: none; max-width: 90vw; text-align: center; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ───── icons: one size, one stroke, centred ───── */
+.ico { width: 15px; height: 15px; flex: none; display: block; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.pill .ico { width: 14px; height: 14px; margin-left: -2px; }
+.pill.icon .ico { margin: 0; width: 16px; height: 16px; }
+.pill.primary .ico { color: var(--bg); }
+.mini { display: grid; place-items: center; padding: 0; color: var(--ink2); }
+.mini:hover { color: var(--ink); border-color: var(--ink2); }
+.mini .ico { width: 14px; height: 14px; }
+.lib-open { display: none; place-items: center; padding: 0; color: var(--ink2); }
+.lib.hide + .lib-open { display: grid; }
+.lib-open .ico { width: 16px; height: 16px; }
+.search-wrap { position: relative; display: block; margin: 0 12px 8px; }
+.search-wrap .ico { position: absolute; left: 10px; top: 50%; margin-top: -7px; width: 14px; height: 14px; color: var(--mute); pointer-events: none; }
+.search-wrap .search { margin: 0; width: 100%; padding-left: 31px; }
+.ti .tw { width: 14px; height: 14px; display: grid; place-items: center; }
+.ti .tw .ico { width: 12px; height: 12px; stroke-width: 2.2; color: var(--mute); }
+.ti .ic { width: 16px; height: 16px; display: grid; place-items: center; color: var(--ink2); }
+.ti .ic .ico { width: 15px; height: 15px; }
+.ti.dir .ic { color: var(--ink); }
+.ti.fn .ic { color: var(--red); }
+.ti.fn .ic .ico { width: 14px; height: 14px; stroke-width: 2.2; }
+.ti { gap: 7px; }
+.n-btn { display: grid; place-items: center; padding: 0; width: 24px; height: 24px; border-radius: 7px; }
+.n-btn .ico { width: 13px; height: 13px; }
+.n-btn[data-act="run"] .ico { width: 12px; height: 12px; }
+.n-btn[data-act="del"]:hover { color: var(--red); }
+.n-head { gap: 5px; }
+.n-head .n-kind { margin-right: 2px; }
+.zoom button { display: grid; place-items: center; width: 28px; min-width: 28px; padding: 0; color: var(--ink2); }
+.zoom button:hover { color: var(--ink); }
+.zoom .ico { width: 14px; height: 14px; }
+.dialog .x { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; padding: 0; top: 14px; right: 14px; }
+.dialog .x:hover { background: var(--panel2); color: var(--ink); }
+.dialog .x .ico { width: 16px; height: 16px; }

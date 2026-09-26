@@ -91,7 +91,7 @@
     if (m.type === 'node') onNodeEvent(m);
     else if (m.type === 'stream') onStream(m);
     else if (m.type === 'term-data') { const t = termByTid(m.tid); if (t) t.xt.write(m.data); }
-    else if (m.type === 'term-exit') { const t = termByTid(m.tid); if (t) { t.alive = false; t.xt.write('\r\n\x1b[2m[process exited' + (m.code != null ? ' with code ' + m.code : '') + ' · press ⟳ to restart]\x1b[0m\r\n'); } }
+    else if (m.type === 'term-exit') { const t = termByTid(m.tid); if (t) { t.alive = false; t.xt.write('\r\n\x1b[2m[process exited' + (m.code != null ? ' with code ' + m.code : '') + ' · click restart in the node header]\x1b[0m\r\n'); } }
   }
   function openConnect() { $('#rc-url').value = RC.url; $('#rc-token').value = ''; $('#connect-modal').hidden = false; }
   $('#runner-pill').onclick = () => { if (RC.ok) toast('Python ' + RC.info.python + ' · folders: ' + RC.info.roots.join(', '), 5000); else openConnect(); };
@@ -121,26 +121,26 @@
   }
   async function dirHTML(p, name, depth) {
     const open = LIB.open.has(p) || depth === 0 && !LIB.open.has('!' + p);
-    let h = `<div class="ti dir" data-dir="${esc(p)}" title="${esc(p)}"><span class="tw">${open ? '▾' : '▸'}</span><span class="ic">▣</span>${esc(name)}</div>`;
+    let h = `<div class="ti dir" data-dir="${esc(p)}" title="${esc(p)}"><span class="tw">${ICON(open ? 'chevron-down' : 'chevron-right')}</span><span class="ic">${ICON('folder')}</span>${esc(name)}</div>`;
     if (!open) return h;
     const items = await listDir(p), kids = [];
     for (const it of items) {
       if (it.dir) kids.push(await dirHTML(it.path, it.name, depth + 1));
       else {
         const fo = LIB.open.has(it.path);
-        kids.push(`<div class="ti file" data-file="${esc(it.path)}" title="${esc(it.path)}"><span class="tw">${fo ? '▾' : '▸'}</span><span class="ic">ƒ</span>${esc(it.name)}</div>`);
+        kids.push(`<div class="ti file" data-file="${esc(it.path)}" title="${esc(it.path)}"><span class="tw">${ICON(fo ? 'chevron-down' : 'chevron-right')}</span><span class="ic">${ICON('file')}</span>${esc(it.name)}</div>`);
         if (fo) { const fs = await scanFile(it.path); kids.push(`<div class="kids">${fs.length ? fs.map(f => fnItem(it.path, f)).join('') : '<div class="ti"><small style="color:var(--mute)">no public functions</small></div>'}</div>`); }
       }
     }
     return h + `<div class="kids">${kids.join('') || '<div class="ti"><small style="color:var(--mute)">empty</small></div>'}</div>`;
   }
-  const fnItem = (file, f) => `<div class="ti fn" draggable="true" data-fn="${esc(f.name)}" data-fnfile="${esc(file)}" title="${esc((f.doc || f.name) + '\n\nDrag onto the canvas, or click to add')}"><span class="tw"></span><span class="ic">●</span>${esc(f.name)}<small>(${esc(f.params.map(p => p.name).join(', '))})</small></div>`;
+  const fnItem = (file, f) => `<div class="ti fn" draggable="true" data-fn="${esc(f.name)}" data-fnfile="${esc(file)}" title="${esc((f.doc || f.name) + '\n\nDrag onto the canvas, or click to add')}"><span class="tw"></span><span class="ic">${ICON('func')}</span>${esc(f.name)}<small>(${esc(f.params.map(p => p.name).join(', '))})</small></div>`;
   async function ensureIndex() { if (LIB.index && Date.now() - LIB.indexAt < 30000) return LIB.index; const r = await req('index'); LIB.index = r.ok ? r.files : []; LIB.indexAt = Date.now(); return LIB.index; }
   async function renderSearch(q) {
     const tree = $('#lib-tree'); tree.innerHTML = '<div class="lib-empty">Searching…</div>';
     const idx = await ensureIndex(), rows = [];
     idx.forEach(f => f.funcs.forEach(fn => { if (fn.toLowerCase().includes(q) || base(f.path).toLowerCase().includes(q)) rows.push({ file: f.path, fn }); }));
-    tree.innerHTML = rows.length ? rows.slice(0, 300).map(r => `<div class="ti fn" draggable="true" data-fn="${esc(r.fn)}" data-fnfile="${esc(r.file)}" title="${esc(r.file)}"><span class="tw"></span><span class="ic">●</span>${esc(r.fn)}<small>${esc(base(r.file))}</small></div>`).join('') : '<div class="lib-empty">No functions match.</div>';
+    tree.innerHTML = rows.length ? rows.slice(0, 300).map(r => `<div class="ti fn" draggable="true" data-fn="${esc(r.fn)}" data-fnfile="${esc(r.file)}" title="${esc(r.file)}"><span class="tw"></span><span class="ic">${ICON('func')}</span>${esc(r.fn)}<small>${esc(base(r.file))}</small></div>`).join('') : '<div class="lib-empty">No functions match.</div>';
   }
   $('#lib-tree').addEventListener('click', async e => {
     const d = e.target.closest('[data-dir]'), f = e.target.closest('[data-file]'), fn = e.target.closest('[data-fn]');
@@ -222,10 +222,10 @@
     const k = KIND[n.kind], st = (R[n.id] || {}).status || '';
     const sub = n.kind === 'func' ? base(n.data.file) : n.kind === 'terminal' ? '' : '';
     const btns = [];
-    if (['func', 'code', 'value', 'viewer'].includes(n.kind)) btns.push('<button class="n-btn" data-act="run" title="Run this node and everything it needs">▶</button>');
-    if (n.kind === 'func') btns.push('<button class="n-btn" data-act="src" title="View source">&lt;/&gt;</button><button class="n-btn" data-act="termhere" title="Open a terminal in this file\'s folder">&gt;_</button>');
-    if (n.kind === 'terminal') btns.push('<button class="n-btn" data-act="restart" title="Restart terminal">⟳</button>');
-    btns.push('<button class="n-btn" data-act="del" title="Delete (Del)">×</button>');
+    if (['func', 'code', 'value', 'viewer'].includes(n.kind)) btns.push(`<button class="n-btn" data-act="run" title="Run this node and everything it needs">${ICON('play')}</button>`);
+    if (n.kind === 'func') btns.push(`<button class="n-btn" data-act="src" title="View source">${ICON('code')}</button><button class="n-btn" data-act="termhere" title="Open a terminal in this file's folder">${ICON('terminal')}</button>`);
+    if (n.kind === 'terminal') btns.push(`<button class="n-btn" data-act="restart" title="Restart terminal">${ICON('refresh')}</button>`);
+    btns.push(`<button class="n-btn" data-act="del" title="Delete (Del)">${ICON('close')}</button>`);
     return `<div class="n-head"><span class="n-st ${st}"></span><span class="n-kind">${k.label}</span><span class="n-title">${esc(n.title)}</span><span class="n-sub">${esc(sub)}</span>${btns.join('')}</div>`;
   }
   function portsHTML(n) {
@@ -723,7 +723,7 @@
   /* ───────── Boot ───────── */
   const firstRun = !S.nodes.length;
   if (firstRun) {
-    const note = { id: uid(), kind: 'note', x: 40, y: 30, w: 330, h: 230, title: 'start here', data: { text: 'Welcome to Flowbench.\n\n1. Connect the runner (top left) so the library shows your Python files.\n2. Drag a function from the library onto the canvas.\n3. Drag from a ● output to a ● input to wire nodes together.\n4. Press ▶ RUN. Results, tables and plots appear inside the nodes.\n5. Open terminals (>_ TERMINAL) to check results in parallel.\n\nThe small workflow on the right is a demo: run it!' } };
+    const note = { id: uid(), kind: 'note', x: 40, y: 30, w: 330, h: 230, title: 'start here', data: { text: 'Welcome to Flowbench.\n\n1. Connect the runner (top left) so the library shows your Python files.\n2. Drag a function from the library onto the canvas.\n3. Drag from a ● output to a ● input to wire nodes together.\n4. Press RUN (top bar). Results, tables and plots appear inside the nodes.\n5. Open terminals (>_ TERMINAL) to check results in parallel.\n\nThe small workflow on the right is a demo: run it!' } };
     const v = { id: uid(), kind: 'value', x: 420, y: 40, w: 280, title: 'x axis', data: { expr: 'np.linspace(0, 12, 400)' } };
     const c = { id: uid(), kind: 'code', x: 760, y: 30, w: 360, h: 300, title: 'damped sine', data: { inputs: 'x', values: {}, code: '# inputs become variables; assign your output to `result`\nimport matplotlib.pyplot as plt\ny = np.sin(x) * np.exp(-x / 5)\nplt.figure(figsize=(5, 2.6))\nplt.plot(x, y)\nplt.title("damped sine")\nresult = y' } };
     const w = { id: uid(), kind: 'viewer', x: 1180, y: 30, w: 420, h: 380, title: 'result', data: {} };
