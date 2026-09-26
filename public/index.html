@@ -11,7 +11,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Doto:wght@700;900&family=Space+Grotesk:wght@400;500;600&family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
-<link rel="stylesheet" href="style.css?v=1" />
+<link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 <header class="bar">
@@ -69,12 +69,12 @@
     <ol class="steps">
       <li>Download <a href="runner.py" download>runner.py</a> and put it anywhere (for example your Desktop).</li>
       <li>Install its two helpers (once):<pre class="cmd">pip install websockets pywinpty</pre><small>pywinpty gives full terminals on Windows. On macOS / Linux just <code>pip install websockets</code>.</small></li>
-      <li>Start it, pointing at the folder with your code:<pre class="cmd">python runner.py --root "C:\Users\zicha\OneDrive\Desktop" --examples</pre><small><code>--examples</code> adds a small demo folder. Your browser opens and connects automatically.</small></li>
+      <li>Start it, pointing at the folder with your code:<pre class="cmd">python runner.py --root "C:\Users\zicha\OneDrive\Desktop" --examples</pre><small><code>--examples</code> adds a small demo folder. Your browser opens Flowbench at <b>http://127.0.0.1:8765</b>, already connected. Use that address from then on.</small></li>
     </ol>
     <details><summary>Connect manually</summary>
       <div class="row"><label>Runner address <input id="rc-url" value="ws://127.0.0.1:8765" /></label><label>Token <input id="rc-token" placeholder="printed by runner.py" /></label><button class="pill primary" id="rc-connect">CONNECT</button></div>
     </details>
-    <p class="fine">The runner only listens on this computer (127.0.0.1), needs the secret token, and only reads the folders you pass with <code>--root</code>. If Chrome asks to allow access to devices on your local network, allow it.</p>
+    <p class="fine"><b>Why a local address?</b> Browsers increasingly block public websites from talking to programs on your computer, so the runner serves this same app locally. The runner only listens on this computer (127.0.0.1), needs the secret token, and only reads the folders you pass with <code>--root</code>. If Chrome asks to allow access to devices on your local network, allow it.</p>
   </div>
 </div>
 
@@ -85,6 +85,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-<script src="app.js?v=1"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

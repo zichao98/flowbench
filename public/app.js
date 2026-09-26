@@ -40,10 +40,12 @@
   function redo() { if (!H.future.length) return; H.past.push(snap()); restore(H.future.pop()); }
 
   /* ───────── Runner connection ───────── */
-  const RC = { url: store.get('flowbench:url', 'ws://127.0.0.1:8765'), token: store.get('flowbench:token', ''), ws: null, ok: false, info: null, pend: new Map(), seq: 0, retry: 0, timer: 0 };
+  // Served by runner.py itself (http://127.0.0.1:<port>/)? Then the runner is on the same host.
+  const LOCAL = location.protocol === 'http:' && /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(location.host);
+  const RC = { url: LOCAL ? 'ws://' + location.host : store.get('flowbench:url', 'ws://127.0.0.1:8765'), token: store.get('flowbench:token', ''), ws: null, ok: false, info: null, pend: new Map(), seq: 0, retry: 0, timer: 0 };
   (function readHash() {
     const h = new URLSearchParams(location.hash.slice(1));
-    if (h.get('token')) { RC.token = h.get('token'); RC.url = h.get('runner') || RC.url; store.set('flowbench:token', RC.token); store.set('flowbench:url', RC.url); history.replaceState(null, '', location.pathname); }
+    if (h.get('token')) { RC.token = h.get('token'); RC.url = LOCAL ? RC.url : (h.get('runner') || RC.url); store.set('flowbench:token', RC.token); store.set('flowbench:url', RC.url); history.replaceState(null, '', location.pathname); }
   })();
   function setStatus(s) {
     const led = $('#runner-led'), lab = $('#runner-label');
@@ -68,7 +70,8 @@
     };
     ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
     ws.onclose = () => {
-      const was = RC.ok; RC.ok = false; RC.ws = null; setStatus('off');
+      const was = RC.ok;
+      if (!was && !LOCAL && RC.retry === 0) toast('This website can’t reach the runner (your browser blocks it). Open the local address runner.py prints: http://127.0.0.1:8765', 8000); RC.ok = false; RC.ws = null; setStatus('off');
       RC.pend.forEach(p => p({ ok: false, error: 'Runner disconnected' })); RC.pend.clear();
       Object.values(TERMS).forEach(t => { t.alive = false; });
       if (was) { toast('Runner disconnected'); renderLib(); }

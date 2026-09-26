@@ -591,6 +591,45 @@ class Session:
         self.kernel.kill()
 
 
+# ─────────────────────────── serve the web app locally ───────────────────────────
+# Browsers increasingly block public https sites from talking to programs on your own
+# computer, so the runner also serves the Flowbench page at http://127.0.0.1:<port>/.
+# The files are fetched from the Flowbench site and cached for offline use.
+ASSET_TYPES = {"/index.html": "text/html; charset=utf-8", "/app.js": "text/javascript; charset=utf-8",
+               "/style.css": "text/css; charset=utf-8", "/runner.py": "text/x-python; charset=utf-8"}
+ASSET_CACHE = {}
+
+
+def get_asset(path):
+    if path in ASSET_CACHE:
+        return ASSET_CACHE[path]
+    import urllib.request
+    cache_file = Path.home() / ".flowbench" / "app" / path.lstrip("/")
+    try:
+        with urllib.request.urlopen(APP_URL.rstrip("/") + path, timeout=8) as r:
+            body = r.read()
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_bytes(body)
+    except Exception:
+        if not cache_file.exists():
+            return None
+        body = cache_file.read_bytes()
+    ASSET_CACHE[path] = body
+    return body
+
+
+def http_response(path):
+    path = path.split("?", 1)[0].split("#", 1)[0]
+    if path == "/":
+        path = "/index.html"
+    if path not in ASSET_TYPES:
+        return 404, "text/plain; charset=utf-8", b"Not found"
+    body = get_asset(path)
+    if body is None:
+        return 502, "text/plain; charset=utf-8", ("Could not download the Flowbench app (no internet?). Open %s instead." % APP_URL).encode()
+    return 200, ASSET_TYPES[path], body
+
+
 def origin_ok(origin, cfg):
     if not origin:
         return True  # non-browser clients still need the token
@@ -707,8 +746,26 @@ async def main():
             sess.cleanup()
 
     url = "ws://127.0.0.1:%d" % cfg.port
-    async with ws_serve(handler, "127.0.0.1", cfg.port, max_size=64 * 1024 * 1024, ping_interval=20):
-        link = "%s#runner=%s&token=%s" % (APP_URL, url, cfg.token)
+
+    if NEW_API:
+        from websockets.datastructures import Headers
+        from websockets.http11 import Response
+
+        def process_request(connection, request):
+            if request.headers.get("Upgrade", "").lower() == "websocket":
+                return None
+            status, ctype, body = http_response(request.path)
+            return Response(status, "OK" if status == 200 else "Error",
+                            Headers([("Content-Type", ctype), ("Content-Length", str(len(body))), ("Cache-Control", "no-cache")]), body)
+    else:
+        def process_request(path, headers):
+            if headers.get("Upgrade", "").lower() == "websocket":
+                return None
+            status, ctype, body = http_response(path)
+            return status, [("Content-Type", ctype), ("Content-Length", str(len(body)))], body
+
+    async with ws_serve(handler, "127.0.0.1", cfg.port, max_size=64 * 1024 * 1024, ping_interval=20, process_request=process_request):
+        link = "http://127.0.0.1:%d/#token=%s" % (cfg.port, cfg.token)
         sys.stdout.reconfigure(line_buffering=True)
         print("\n  FLOWBENCH runner v%s" % VERSION)
         print("  Python   : %s (%s)" % (cfg.python, sys.version.split()[0]))
@@ -716,7 +773,8 @@ async def main():
         print("  Listening: %s  (this computer only)" % url)
         print("  Terminal : %s" % ("full" if (PtyProcess or not IS_WIN) else "basic  (pip install pywinpty for a full terminal)"))
         print("  Token    : %s" % cfg.token)
-        print("\n  Open Flowbench and connect:\n  %s\n" % link)
+        print("\n  Open Flowbench (connects automatically):\n  %s\n" % link)
+        print("  (Or open %s and paste the token.)\n" % APP_URL)
         print("  Keep this window open. Press Ctrl+C to stop.\n")
         if not cfg.no_browser:
             try:
